@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: relax-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: relax
+      POSTGRES_PASSWORD: relax
+      POSTGRES_DB: relax
+    ports:
+      - '5432:5432'
+    volumes:
+      - relax_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U relax -d relax']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional for Phase 5 (queues / rate limits / cache)
+  redis:
+    image: redis:7-alpine
+    container_name: relax-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - relax_redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: runtime
+    container_name: relax-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://relax:relax@postgres:5432/relax?schema=public
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  relax_pgdata:
+  relax_redisdata:
