@@ -35,6 +35,14 @@ npm run prisma:generate
 npm run prisma:migrate -- --name init
 ```
 
+**No Docker / no sudo?** Use the bundled throwaway cluster:
+
+```bash
+./scripts/local-db.sh start
+# copy the printed DATABASE_URL into .env
+./scripts/local-db.sh stop   # when done
+```
+
 Then apply constraints that Prisma cannot express (partial unique index for
 double-booking, money checks):
 

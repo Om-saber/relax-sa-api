@@ -24,6 +24,8 @@ cp .env.example .env
 
 # 1. Start PostgreSQL (and Redis for later phases)
 docker compose up -d postgres
+# No Docker / no sudo? use the bundled local cluster instead:
+# ./scripts/local-db.sh start   # prints the DATABASE_URL to use
 
 # 2. Install dependencies
 npm install
