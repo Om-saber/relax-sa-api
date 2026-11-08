@@ -72,6 +72,7 @@ prisma/
 ├── seed.ts          # idempotent seed
 └── sql/             # constraints Prisma cannot express (partial unique index)
 docs/
+├── REQUIREMENTS-ANALYSIS.md  # ← ابدأ من هنا: تحليل المتطلبات والفجوات
 ├── SETUP.md
 ├── ARCHITECTURE.md
 ├── ASSUMPTIONS.md
@@ -101,10 +102,14 @@ Error:
 
 ## Roadmap
 
+> الخطة التفصيلية والتقديرات في [`docs/REQUIREMENTS-ANALYSIS.md`](docs/REQUIREMENTS-ANALYSIS.md) §11.
+
 - [x] **Phase 0** — repo, schema, scaffold, Docker, docs
 - [x] **Phase 1** — auth (OTP + password), RBAC, profile
-- [ ] **Phase 2** — catalog, CMS, media, reviews
-- [ ] **Phase 3** — booking core (availability, double-booking, state machine)
-- [ ] **Phase 4** — payments, invoices, gift cards
-- [ ] **Phase 5** — staff ops, commissions, CRM, notifications, reports
-- [ ] **Phase 6** — hardening, tests, observability, launch
+- [ ] **Phase 2** — addresses, password reset, catalog, CMS, media, reviews
+- [ ] **Phase 3** — booking core (variants, packages, teams, availability, conflicts, state machine)
+- [ ] **Phase 4** — orders, payments, payment links, partial payments, invoices
+- [ ] **Phase 5** — wallet, loyalty points, promotions, favorites
+- [ ] **Phase 6** — admin ops (calendar, filters, branch scoping, reports, CRM)
+- [ ] **Phase 7** — notifications (email, WhatsApp, queue)
+- [ ] **Phase 8** — hardening, tests, observability, launch
