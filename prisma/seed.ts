@@ -119,6 +119,7 @@ const CATEGORIES = [
 const SERVICES = [
   {
     slug: 'calm-package',
+    imageUrl: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80',
     category: 'packages',
     titleAr: 'باقة الهدوء',
     titleEn: 'Calm Package',
@@ -126,10 +127,10 @@ const SERVICES = [
     originalPrice: 450,
     durationMinutes: 90,
     badgeAr: 'الأكثر طلباً',
-    imageUrl: '/images/logo-horizontal.jpg',
   },
   {
     slug: 'beauty-package',
+    imageUrl: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=800&q=80',
     category: 'packages',
     titleAr: 'باقة الجمال',
     titleEn: 'Beauty Package',
@@ -140,6 +141,7 @@ const SERVICES = [
   },
   {
     slug: 'moroccan-royal',
+    imageUrl: 'https://images.unsplash.com/photo-1600334129128-685c5582fd35?auto=format&fit=crop&w=800&q=80',
     category: 'moroccan',
     titleAr: 'الحمام المغربي الملكي الفاخر',
     titleEn: 'Royal Moroccan Bath',
@@ -148,6 +150,7 @@ const SERVICES = [
   },
   {
     slug: 'swedish-massage',
+    imageUrl: 'https://images.unsplash.com/photo-1600334089648-b0d9d3028eb2?auto=format&fit=crop&w=800&q=80',
     category: 'massage',
     titleAr: 'المساج السويدي الاسترخائي',
     titleEn: 'Swedish Relaxing Massage',
@@ -156,6 +159,7 @@ const SERVICES = [
   },
   {
     slug: 'deep-tissue',
+    imageUrl: 'https://images.unsplash.com/photo-1519823551278-64ac92734fb1?auto=format&fit=crop&w=800&q=80',
     category: 'massage',
     titleAr: 'مساج الأنسجة العميقة',
     titleEn: 'Deep Tissue Massage',
@@ -164,6 +168,7 @@ const SERVICES = [
   },
   {
     slug: 'pregnancy-massage',
+    imageUrl: 'https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=800&q=80',
     category: 'maternity',
     titleAr: 'مساج الحوامل',
     titleEn: 'Pregnancy Massage',
@@ -172,6 +177,7 @@ const SERVICES = [
   },
   {
     slug: 'facial-glow',
+    imageUrl: 'https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?auto=format&fit=crop&w=800&q=80',
     category: 'beauty',
     titleAr: 'فيشل النضارة والكولاجين',
     titleEn: 'Collagen Glow Facial',
@@ -180,6 +186,7 @@ const SERVICES = [
   },
   {
     slug: 'hot-stones',
+    imageUrl: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=800&q=80',
     category: 'massage',
     titleAr: 'مساج الأحجار البركانية',
     titleEn: 'Hot Stone Massage',
@@ -193,6 +200,61 @@ const ADDONS = [
   { nameAr: 'مساج أحجار بركانية إضافي للظهر', nameEn: 'Extra Hot Stones', price: 50, duration: 15 },
   { nameAr: 'مقشر الورد الفاسي للأقدام', nameEn: 'Rose Feet Scrub', price: 45, duration: 15 },
   { nameAr: 'زيت مسك ملكي خاص إضافي', nameEn: 'Royal Musk Oil', price: 35, duration: 0 },
+];
+
+
+// ---------------------------------------------------------------------------
+// Packages (bundles of multiple services)
+// ---------------------------------------------------------------------------
+const PACKAGES = [
+  {
+    slug: 'dalal-royal',
+    titleAr: 'باقة الدلال الملكية',
+    titleEn: 'Royal Dalal Package',
+    descriptionAr: 'تجربة دلال ملكية متكاملة: الحمام المغربي + المساج السويدي + فيشل النضارة',
+    descriptionEn: 'Royal spa: Moroccan bath + Swedish massage + Collagen facial',
+    imageUrl: 'https://images.unsplash.com/photo-1600334129128-685c5582fd35?auto=format&fit=crop&w=800&q=80',
+    price: 699,
+    originalPrice: 749,
+    durationMinutes: 195,
+    services: [
+      { slug: 'moroccan-royal', quantity: 1, durationMinutes: 90 },
+      { slug: 'swedish-massage', quantity: 1, durationMinutes: 60 },
+      { slug: 'facial-glow', quantity: 1, durationMinutes: 45 },
+    ],
+  },
+  {
+    slug: 'spa-day',
+    titleAr: 'يوم السبا الكامل',
+    titleEn: 'Full Spa Day',
+    descriptionAr: 'يوم كامل من الاسترخاء: مساج سويدي + حمام مغربي + فيشل + أحجار بركانية',
+    descriptionEn: 'Full relaxation day: Swedish + Moroccan + Facial + Hot stones',
+    imageUrl: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=800&q=80',
+    price: 999,
+    originalPrice: 1166,
+    durationMinutes: 270,
+    services: [
+      { slug: 'swedish-massage', quantity: 1, durationMinutes: 60 },
+      { slug: 'moroccan-royal', quantity: 1, durationMinutes: 90 },
+      { slug: 'facial-glow', quantity: 1, durationMinutes: 45 },
+      { slug: 'hot-stones', quantity: 1, durationMinutes: 75 },
+    ],
+  },
+  {
+    slug: 'relax-escape',
+    titleAr: 'هروب الاسترخاء',
+    titleEn: 'Relax Escape',
+    descriptionAr: 'جلسة سريعة لتجديد الطاقة: مساج سويدي + مساج أحجار بركانية',
+    descriptionEn: 'Quick energy boost: Swedish massage + Hot stones',
+    imageUrl: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80',
+    price: 499,
+    originalPrice: 578,
+    durationMinutes: 135,
+    services: [
+      { slug: 'swedish-massage', quantity: 1, durationMinutes: 60 },
+      { slug: 'hot-stones', quantity: 1, durationMinutes: 75 },
+    ],
+  },
 ];
 
 async function main() {
@@ -326,7 +388,12 @@ async function main() {
   for (const [index, category] of CATEGORIES.entries()) {
     const created = await prisma.serviceCategory.upsert({
       where: { key: category.key },
-      update: { nameAr: category.nameAr, nameEn: category.nameEn, sortOrder: index },
+      update: {
+        nameAr: category.nameAr,
+        nameEn: category.nameEn,
+        icon: category.icon,
+        sortOrder: index,
+      },
       create: {
         key: category.key,
         nameAr: category.nameAr,
@@ -346,7 +413,10 @@ async function main() {
         titleAr: service.titleAr,
         titleEn: service.titleEn,
         price: service.price,
+        originalPrice: service.originalPrice,
         durationMinutes: service.durationMinutes,
+        badgeAr: service.badgeAr,
+        imageUrl: service.imageUrl,
         sortOrder: index,
       },
       create: {
@@ -569,6 +639,52 @@ async function main() {
       active: true,
     },
   });
+
+  // --- Packages ------------------------------------------------------------
+  for (const pkg of PACKAGES) {
+    const created = await prisma.package.upsert({
+      where: { slug: pkg.slug },
+      update: {
+        titleAr: pkg.titleAr,
+        titleEn: pkg.titleEn,
+        descriptionAr: pkg.descriptionAr,
+        descriptionEn: pkg.descriptionEn,
+        imageUrl: pkg.imageUrl,
+        price: pkg.price,
+        originalPrice: pkg.originalPrice,
+        durationMinutes: pkg.durationMinutes,
+        isActive: true,
+      },
+      create: {
+        slug: pkg.slug,
+        titleAr: pkg.titleAr,
+        titleEn: pkg.titleEn,
+        descriptionAr: pkg.descriptionAr,
+        descriptionEn: pkg.descriptionEn,
+        imageUrl: pkg.imageUrl,
+        price: pkg.price,
+        originalPrice: pkg.originalPrice,
+        durationMinutes: pkg.durationMinutes,
+        isActive: true,
+      },
+    });
+
+    await prisma.packageItem.deleteMany({ where: { packageId: created.id } });
+
+    for (const item of pkg.services) {
+      const svc = await prisma.service.findUnique({ where: { slug: item.slug } });
+      if (!svc) continue;
+      await prisma.packageItem.create({
+        data: {
+          packageId: created.id,
+          serviceId: svc.id,
+          quantity: item.quantity,
+          durationMinutes: item.durationMinutes,
+        },
+      });
+    }
+  }
+  console.log(`✅ Seeded ${PACKAGES.length} packages`);
 
   console.log('✅ Seed completed');
   console.log(`   Admin: ${adminEmail} / ${adminPassword}`);
