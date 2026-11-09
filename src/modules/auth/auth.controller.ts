@@ -23,7 +23,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 100, ttl: 60_000 } })
   @Post('otp/request')
   @HttpCode(200)
   @ApiOperation({ summary: 'إرسال رمز تحقق OTP لرقم جوال سعودي' })
