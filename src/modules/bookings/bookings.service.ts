@@ -1,7 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { BookingStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
+import { BookingStatus, BookingType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { QuerySlotsDto } from './dto/query-slots.dto';
+import type { CreateBookingDto } from './dto/create-booking.dto';
 
 // Statuses that "occupy" a slot (don't count cancelled/no-show)
 const OCCUPYING_STATUSES: BookingStatus[] = [
@@ -135,6 +140,174 @@ export class BookingsService {
     };
   }
 
+
+  // ─────────────────────────────────────────────────────
+  // POST /bookings — Create booking
+  // ─────────────────────────────────────────────────────
+  async create(dto: CreateBookingDto) {
+    const dateObj = this.parseDate(dto.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dateObj < today) {
+      throw new BadRequestException({ code: 'DATE_IN_PAST', message: 'لا يمكن الحجز في تاريخ ماضي' });
+    }
+
+    const city = await this.prisma.city.findUnique({
+      where: { key: dto.city },
+      select: { id: true, key: true, maxDailyCapacity: true, isActive: true },
+    });
+    if (!city || !city.isActive) {
+      throw new BadRequestException({ code: 'CITY_NOT_FOUND', message: 'المدينة غير متاحة' });
+    }
+
+    const blackout = await this.prisma.blackoutDate.findFirst({
+      where: { cityId: city.id, date: dateObj, active: true },
+      select: { title: true },
+    });
+    if (blackout) {
+      throw new BadRequestException({
+        code: 'BLACKOUT_DATE',
+        message: `هذا التاريخ غير متاح للحجز: ${blackout.title}`,
+      });
+    }
+
+    const dailyBooked = await this.prisma.booking.count({
+      where: {
+        cityId: city.id,
+        date: dateObj,
+        status: { in: OCCUPYING_STATUSES },
+        deletedAt: null,
+      },
+    });
+    if (city.maxDailyCapacity > 0 && dailyBooked >= city.maxDailyCapacity) {
+      throw new BadRequestException({
+        code: 'DAILY_CAPACITY_REACHED',
+        message: 'تم الوصول للحد الأقصى من الحجوزات في هذا اليوم.',
+      });
+    }
+
+    const slot = await this.prisma.timeSlot.findUnique({
+      where: { key: dto.timeSlotKey },
+      select: { id: true, key: true, startTime: true, endTime: true, isActive: true },
+    });
+    if (!slot || !slot.isActive) {
+      throw new BadRequestException({ code: 'TIMESLOT_NOT_FOUND', message: 'الموعد غير متاح' });
+    }
+
+    const startAt = new Date(`${dto.date}T${slot.startTime}:00+03:00`);
+    const endAt = new Date(`${dto.date}T${slot.endTime}:00+03:00`);
+    if (endAt <= startAt) endAt.setUTCDate(endAt.getUTCDate() + 1);
+
+    const slugs = dto.items.map((i) => i.serviceSlug);
+    const services = await this.prisma.service.findMany({
+      where: { slug: { in: slugs }, isActive: true },
+      select: { id: true, slug: true, titleAr: true, titleEn: true, price: true, durationMinutes: true },
+    });
+    if (services.length !== slugs.length) {
+      const found = new Set(services.map((s) => s.slug));
+      const missing = slugs.filter((s) => !found.has(s));
+      throw new BadRequestException({
+        code: 'SERVICES_NOT_FOUND',
+        message: `خدمات غير موجودة: ${missing.join(', ')}`,
+      });
+    }
+    const serviceMap = new Map(services.map((s) => [s.slug, s]));
+
+    const itemsData = dto.items.map((item) => {
+      const svc = serviceMap.get(item.serviceSlug)!;
+      const lineTotal = Number(svc.price) * item.quantity;
+      return {
+        serviceId: svc.id,
+        titleAr: svc.titleAr,
+        titleEn: svc.titleEn,
+        unitPrice: svc.price,
+        quantity: item.quantity,
+        durationMinutes: svc.durationMinutes,
+        total: new Prisma.Decimal(lineTotal.toFixed(2)),
+      };
+    });
+    const subtotal = itemsData.reduce((sum, i) => sum + Number(i.total), 0);
+    const totalPrice = subtotal;
+    const vatAmount = +(totalPrice - totalPrice / 1.15).toFixed(2);
+
+    // Booking.clientId references ClientProfile.id (NOT User.id)
+    const clientUser = await this.prisma.user.findFirst({
+      where: { phone: dto.customerPhone, role: UserRole.CUSTOMER, deletedAt: null },
+      select: { clientProfile: { select: { id: true } } },
+    });
+    const clientProfileId = clientUser?.clientProfile?.id ?? null;
+
+    const year = dateObj.getUTCFullYear();
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`booking_num_${year}`}))`;
+
+          const count = await tx.booking.count({
+            where: { bookingNumber: { startsWith: `RLX-${year}-` } },
+          });
+          const bookingNumber = `RLX-${year}-${(count + 1).toString().padStart(4, '0')}`;
+
+          const created = await tx.booking.create({
+            data: {
+              bookingNumber,
+              clientId: clientProfileId,
+              customerName: dto.customerName.trim(),
+              customerPhone: dto.customerPhone,
+              cityId: city.id,
+              district: dto.district?.trim() ?? null,
+              address: dto.address?.trim() ?? null,
+              date: dateObj,
+              timeSlotId: slot.id,
+              startAt,
+              endAt,
+              bookingType: BookingType.INDIVIDUAL,
+              beneficiariesCount: dto.beneficiariesCount ?? 1,
+              status: BookingStatus.PENDING,
+              subtotal: new Prisma.Decimal(subtotal.toFixed(2)),
+              discountAmount: new Prisma.Decimal('0.00'),
+              vatAmount: new Prisma.Decimal(vatAmount.toFixed(2)),
+              totalPrice: new Prisma.Decimal(totalPrice.toFixed(2)),
+              paymentMethod: (dto.paymentMethod as any) ?? null,
+              paymentStatus: 'UNPAID',
+              notes: dto.notes?.trim() ?? null,
+              items: { create: itemsData },
+            },
+            include: {
+              items: true,
+              timeSlot: { select: { key: true, labelAr: true, startTime: true, endTime: true } },
+            },
+          });
+
+          return this.serializeBooking(created);
+        },
+        { timeout: 15000 },
+      );
+    } catch (err) {
+      if (typeof err?.message === 'string' && err.message.includes('BOOKING_CONFLICT')) {
+        throw new ConflictException({
+          code: 'BOOKING_CONFLICT',
+          message: 'هذا الموعد محجوز بالفعل. يرجى اختيار وقت آخر.',
+        });
+      }
+      throw err;
+    }
+  }
+
+  private serializeBooking(b: any) {
+    return {
+      ...b,
+      subtotal: Number(b.subtotal),
+      discountAmount: Number(b.discountAmount),
+      vatAmount: Number(b.vatAmount),
+      totalPrice: Number(b.totalPrice),
+      items: (b.items ?? []).map((i: any) => ({
+        ...i,
+        unitPrice: Number(i.unitPrice),
+        total: Number(i.total),
+      })),
+    };
+  }
   // ─────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────
