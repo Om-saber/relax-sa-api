@@ -1,16 +1,20 @@
 // ---------------------------------------------------------------------------
-// Let's Relax - Prisma schema (Phase 0 baseline)
+// Let's Relax - Prisma schema
 //
 // Conventions
 //  - Money is stored as Decimal(10,2) in SAR.
 //  - Prices are VAT-inclusive; VAT is derived on the invoice (ASSUMPTIONS.md).
 //  - Every business table has createdAt / updatedAt; user-facing soft delete
-//    only where required (User, Booking).
-//  - Double-booking protection is a PARTIAL unique index (see prisma/sql).
+//    only where required (User, Booking, Order).
+//  - Booking = scheduled event (when / where / who).
+//    Order   = financial container (what was bought / discounts / payments).
+//  - Double-booking protection uses an EXCLUDE constraint on real time ranges
+//    (see prisma/sql/02-booking-overlap.sql), not on slot ids.
 // ---------------------------------------------------------------------------
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -48,6 +52,19 @@ enum BookingStatus {
   NO_SHOW
 }
 
+enum BookingType {
+  INDIVIDUAL
+  GROUP
+}
+
+enum BookingSource {
+  WEBSITE
+  ADMIN
+  PHONE
+  WHATSAPP
+  WALK_IN
+}
+
 enum PaymentMethod {
   CASH
   CARD
@@ -56,10 +73,13 @@ enum PaymentMethod {
   TABBY
   TAMARA
   BANK_TRANSFER
+  POINTS
+  WALLET
 }
 
 enum PaymentStatus {
   UNPAID
+  PARTIALLY_PAID
   AUTHORIZED
   PAID
   PARTIALLY_REFUNDED
@@ -74,9 +94,40 @@ enum PaymentProvider {
   TAMARA
 }
 
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum OrderItemKind {
+  SERVICE
+  PACKAGE
+  GIFT_CARD
+  PRODUCT
+}
+
+enum PaymentLinkStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+}
+
 enum DiscountType {
   PERCENTAGE
   FIXED
+}
+
+enum PromotionScope {
+  ALL
+  SERVICE
+  CATEGORY
+  PACKAGE
+  CITY
 }
 
 enum GiftCardStatus {
@@ -93,6 +144,32 @@ enum GiftCardTxType {
   ADJUST
 }
 
+enum WalletTxType {
+  CREDIT
+  DEBIT
+  REFUND
+  ADJUST
+}
+
+enum LoyaltyTxType {
+  EARN
+  REDEEM
+  EXPIRE
+  ADJUST
+}
+
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ReviewStatus {
   PENDING
   APPROVED
@@ -103,6 +180,13 @@ enum TicketStatus {
   NEW
   IN_PROGRESS
   RESOLVED
+  CLOSED
+}
+
+enum ContactMessageStatus {
+  NEW
+  READ
+  REPLIED
   CLOSED
 }
 
@@ -149,16 +233,22 @@ model User {
   role            UserRole  @default(CUSTOMER)
   isActive        Boolean   @default(true)
   phoneVerifiedAt DateTime?
+  emailVerifiedAt DateTime?
+  preferredLocale String    @default("ar")
   lastLoginAt     DateTime?
   tokenVersion    Int       @default(0)
   twoFactorSecret String?
 
-  roleId String?
-  roleRef Role?  @relation(fields: [roleId], references: [id])
+  roleId   String?
+  roleRef  Role?   @relation(fields: [roleId], references: [id])
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id])
 
   clientProfile ClientProfile?
   staffProfile  StaffProfile?
   refreshTokens RefreshToken[]
+  passwordResetTokens    PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
   notifications Notification[]
   auditLogs     AuditLog[]
   reviews       Review[]
@@ -172,6 +262,7 @@ model User {
 
   @@index([role])
   @@index([isActive])
+  @@index([branchId])
   @@map("users")
 }
 
@@ -214,15 +305,15 @@ model RolePermission {
 }
 
 model OtpCode {
-  id        String    @id @default(uuid())
-  phone     String
-  codeHash  String
-  purpose   String    @default("LOGIN")
-  expiresAt DateTime
-  attempts  Int       @default(0)
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String
+  purpose    String    @default("LOGIN")
+  expiresAt  DateTime
+  attempts   Int       @default(0)
   consumedAt DateTime?
-  ip        String?
-  createdAt DateTime  @default(now())
+  ip         String?
+  createdAt  DateTime  @default(now())
 
   @@index([phone, createdAt])
   @@map("otp_codes")
@@ -244,6 +335,36 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
 // ----------------------------- Geography -----------------------------------
 
 model City {
@@ -262,6 +383,8 @@ model City {
   bookings      Booking[]
   cityPrices    ServiceCityPrice[]
   blackouts     BlackoutDate[]
+  addresses     Address[]
+  teams         Team[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -278,9 +401,12 @@ model Branch {
   phone       String?
   isActive    Boolean @default(true)
 
-  city     City          @relation(fields: [cityId], references: [id])
-  staff    StaffBranch[]
-  bookings Booking[]
+  city         City           @relation(fields: [cityId], references: [id])
+  staff        StaffBranch[]
+  bookings     Booking[]
+  teams        Team[]
+  workingHours WorkingHours[]
+  users        User[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -290,11 +416,16 @@ model Branch {
 }
 
 model CoverageArea {
-  id      String  @id @default(uuid())
-  cityId  String
-  nameAr  String
-  nameEn  String
-  isActive Boolean @default(true)
+  id        String  @id @default(uuid())
+  cityId    String
+  nameAr    String
+  nameEn    String
+  isActive  Boolean @default(true)
+  // Optional geo fence. A district name is the primary launch check; these
+  // coordinates are used for map display and a secondary distance check.
+  centerLat Decimal? @db.Decimal(10, 7)
+  centerLng Decimal? @db.Decimal(10, 7)
+  radiusKm  Decimal? @db.Decimal(6, 2)
 
   city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
 
@@ -348,29 +479,34 @@ model ServiceCategory {
 }
 
 model Service {
-  id              String  @id @default(uuid())
-  categoryId      String
-  slug            String  @unique
-  titleAr         String
-  titleEn         String
-  descriptionAr   String?
-  descriptionEn   String?
-  price           Decimal @db.Decimal(10, 2)
-  originalPrice   Decimal? @db.Decimal(10, 2)
-  durationMinutes Int
-  badgeAr         String?
-  badgeEn         String?
-  imageUrl        String?
-  rating          Decimal @default(5) @db.Decimal(3, 2)
-  reviewsCount    Int     @default(0)
-  isActive        Boolean @default(true)
-  sortOrder       Int     @default(0)
+  id               String  @id @default(uuid())
+  categoryId       String
+  slug             String  @unique
+  titleAr          String
+  titleEn          String
+  descriptionAr    String?
+  descriptionEn    String?
+  price            Decimal @db.Decimal(10, 2)
+  originalPrice    Decimal? @db.Decimal(10, 2)
+  durationMinutes  Int
+  maxBeneficiaries Int     @default(1)
+  badgeAr          String?
+  badgeEn          String?
+  imageUrl         String?
+  rating           Decimal @default(5) @db.Decimal(3, 2)
+  reviewsCount     Int     @default(0)
+  isActive         Boolean @default(true)
+  sortOrder        Int     @default(0)
 
-  category  ServiceCategory @relation(fields: [categoryId], references: [id])
-  addons    ServiceAddon[]
-  staff     StaffService[]
-  cityPrices ServiceCityPrice[]
-  items     BookingItem[]
+  category    ServiceCategory    @relation(fields: [categoryId], references: [id])
+  addons      ServiceAddon[]
+  staff       StaffService[]
+  cityPrices  ServiceCityPrice[]
+  items       BookingItem[]
+  variants    ServiceVariant[]
+  packageItems PackageItem[]
+  favorites   Favorite[]
+  orderItems  OrderItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -378,6 +514,25 @@ model Service {
   @@index([categoryId])
   @@index([isActive])
   @@map("services")
+}
+
+model ServiceVariant {
+  id              String  @id @default(uuid())
+  serviceId       String
+  labelAr         String
+  labelEn         String?
+  durationMinutes Int
+  price           Decimal @db.Decimal(10, 2)
+  isDefault       Boolean @default(false)
+  isActive        Boolean @default(true)
+  sortOrder       Int     @default(0)
+
+  service Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  items   BookingItem[]
+
+  @@unique([serviceId, durationMinutes])
+  @@index([serviceId])
+  @@map("service_variants")
 }
 
 model ServiceAddon {
@@ -407,32 +562,78 @@ model ServiceCityPrice {
   @@map("service_city_prices")
 }
 
+model Package {
+  id               String  @id @default(uuid())
+  slug             String  @unique
+  titleAr          String
+  titleEn          String?
+  descriptionAr    String?
+  descriptionEn    String?
+  imageUrl         String?
+  price            Decimal @db.Decimal(10, 2)
+  originalPrice    Decimal? @db.Decimal(10, 2)
+  durationMinutes  Int
+  maxBeneficiaries Int     @default(1)
+  isActive         Boolean @default(true)
+  sortOrder        Int     @default(0)
+
+  items     PackageItem[]
+  bookings  Booking[]
+  favorites Favorite[]
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("packages")
+}
+
+model PackageItem {
+  id              String @id @default(uuid())
+  packageId       String
+  serviceId       String
+  quantity        Int    @default(1)
+  durationMinutes Int
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([packageId, serviceId])
+  @@map("package_items")
+}
+
 // ----------------------------- Staff ---------------------------------------
 
 model StaffProfile {
-  id                    String      @id @default(uuid())
-  userId                String      @unique
-  staffCode             String      @unique
-  roleTitle             String
-  cityId                String?
-  commissionRate        Decimal     @default(20) @db.Decimal(5, 2)
-  status                StaffStatus @default(AVAILABLE)
-  rating                Decimal     @default(5) @db.Decimal(3, 2)
-  reviewsCount          Int         @default(0)
-  completedBookingsCount Int        @default(0)
-  shiftStart            String?
-  shiftEnd              String?
-  isPartOfTeam          Boolean     @default(false)
-  avatarUrl             String?
+  id                     String      @id @default(uuid())
+  userId                 String      @unique
+  staffCode              String      @unique
+  roleTitle              String
+  cityId                 String?
+  commissionRate         Decimal     @default(20) @db.Decimal(5, 2)
+  status                 StaffStatus @default(AVAILABLE)
+  rating                 Decimal     @default(5) @db.Decimal(3, 2)
+  reviewsCount           Int         @default(0)
+  completedBookingsCount Int         @default(0)
+  maxDailyBookings       Int         @default(0)
+  shiftStart             String?
+  shiftEnd               String?
+  isPartOfTeam           Boolean     @default(false)
+  avatarUrl              String?
 
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  services  StaffService[]
-  branches  StaffBranch[]
-  offDays   StaffOffDay[]
-  bookings  Booking[]
-  reviews   Review[]
-  commissions Commission[]
-  payouts   Payout[]
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services       StaffService[]
+  branches       StaffBranch[]
+  offDays        StaffOffDay[]
+  bookings       Booking[]
+  reviews        Review[]
+  commissions    Commission[]
+  payouts        Payout[]
+  teams          TeamMember[]
+  leaves         StaffLeave[]
+  blockedTimes   StaffBlockedTime[]
+  workingHours   WorkingHours[]
+  beneficiaries  BookingBeneficiary[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -462,6 +663,7 @@ model StaffBranch {
   @@map("staff_branches")
 }
 
+/// Legacy recurring weekday off. Prefer `StaffLeave` for dated ranges.
 model StaffOffDay {
   id      String @id @default(uuid())
   staffId String
@@ -471,6 +673,93 @@ model StaffOffDay {
 
   @@unique([staffId, weekday])
   @@map("staff_off_days")
+}
+
+model StaffLeave {
+  id      String      @id @default(uuid())
+  staffId String
+  startAt DateTime
+  endAt   DateTime
+  reason  String?
+  status  LeaveStatus @default(APPROVED)
+
+  staff StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([staffId, startAt])
+  @@map("staff_leaves")
+}
+
+model StaffBlockedTime {
+  id          String   @id @default(uuid())
+  staffId     String?
+  teamId      String?
+  startAt     DateTime
+  endAt       DateTime
+  reason      String?
+  createdById String?
+
+  staff StaffProfile? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  team  Team?         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([staffId, startAt])
+  @@index([teamId, startAt])
+  @@map("staff_blocked_times")
+}
+
+model WorkingHours {
+  id        String  @id @default(uuid())
+  staffId   String?
+  branchId  String?
+  weekday   Int // 0 = Sunday ... 6 = Saturday
+  startTime String
+  endTime   String
+  isActive  Boolean @default(true)
+
+  staff  StaffProfile? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  branch Branch?       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, weekday])
+  @@index([branchId, weekday])
+  @@map("working_hours")
+}
+
+model Team {
+  id               String  @id @default(uuid())
+  code             String  @unique
+  nameAr           String
+  nameEn           String?
+  cityId           String?
+  branchId         String?
+  maxDailyBookings Int     @default(0)
+  isActive         Boolean @default(true)
+
+  city         City?              @relation(fields: [cityId], references: [id])
+  branch       Branch?            @relation(fields: [branchId], references: [id])
+  members      TeamMember[]
+  bookings     Booking[]
+  blockedTimes StaffBlockedTime[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cityId])
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId String
+  staffId String
+  isLead Boolean @default(false)
+
+  team  Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  staff StaffProfile @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, staffId])
+  @@map("team_members")
 }
 
 // ----------------------------- Clients -------------------------------------
@@ -483,12 +772,19 @@ model ClientProfile {
   totalBookings   Int        @default(0)
   totalSpent      Decimal    @default(0) @db.Decimal(10, 2)
   lastBookingDate DateTime?  @db.Date
+
+  // Legacy single address kept as a snapshot. New addresses live in `Address`.
   district        String?
   address         String?
   cityId          String?
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookings Booking[]
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+  orders    Order[]
+  addresses Address[]
+  wallet    Wallet?
+  loyalty   LoyaltyAccount?
+  favorites Favorite[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -496,23 +792,56 @@ model ClientProfile {
   @@map("client_profiles")
 }
 
+model Address {
+  id            String       @id @default(uuid())
+  clientId      String
+  label         AddressLabel @default(HOME)
+  recipientName String?
+  phone         String?
+  cityId        String
+  district      String
+  street        String
+  buildingNo    String?
+  notes         String?
+  lat           Decimal?     @db.Decimal(10, 7)
+  lng           Decimal?     @db.Decimal(10, 7)
+  isDefault     Boolean      @default(false)
+
+  client   ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  city     City          @relation(fields: [cityId], references: [id])
+  bookings Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@map("addresses")
+}
+
 // ----------------------------- Bookings ------------------------------------
 
 model Booking {
-  id               String        @id @default(uuid())
-  bookingNumber    String        @unique
-  clientId         String?
-  customerName     String
-  customerPhone    String
-  cityId           String
-  branchId         String?
-  district         String?
-  address          String?
-  date             DateTime      @db.Date
-  timeSlotId       String
-  status           BookingStatus @default(PENDING)
+  id                 String        @id @default(uuid())
+  bookingNumber      String        @unique
+  clientId           String?
+  customerName       String
+  customerPhone      String
+  cityId             String
+  branchId           String?
+  district           String?
+  address            String?
+  addressId          String?
+  date               DateTime      @db.Date
+  timeSlotId         String?
+  // Real scheduling window. This is the source of truth for conflicts.
+  startAt            DateTime?     @db.Timestamptz(3)
+  endAt              DateTime?     @db.Timestamptz(3)
+  bookingType        BookingType   @default(INDIVIDUAL)
+  beneficiariesCount Int           @default(1)
+  source             BookingSource @default(WEBSITE)
+  status             BookingStatus @default(PENDING)
 
-  // Money snapshot (VAT-inclusive prices)
+  // Money snapshot (VAT-inclusive prices). Mirrored on the parent Order.
   subtotal         Decimal @db.Decimal(10, 2)
   discountAmount   Decimal @default(0) @db.Decimal(10, 2)
   vatAmount        Decimal @default(0) @db.Decimal(10, 2)
@@ -520,67 +849,99 @@ model Booking {
   paymentMethod    PaymentMethod?
   paymentStatus    PaymentStatus @default(UNPAID)
 
-  notes            String?
-  specialistId     String?
-  commissionRateSnapshot Decimal? @db.Decimal(5, 2)
-  commissionAmount Decimal? @db.Decimal(10, 2)
+  notes                   String?
+  specialistId            String?
+  teamId                  String?
+  packageId               String?
+  orderId                 String?
+  commissionRateSnapshot  Decimal? @db.Decimal(5, 2)
+  commissionAmount        Decimal? @db.Decimal(10, 2)
 
-  createdById      String?
-  cancelledAt      DateTime?
-  cancelReason     String?
+  createdById  String?
+  cancelledAt  DateTime?
+  cancelReason String?
 
-  client     ClientProfile? @relation(fields: [clientId], references: [id])
-  city       City           @relation(fields: [cityId], references: [id])
-  branch     Branch?        @relation(fields: [branchId], references: [id])
-  timeSlot   TimeSlot       @relation(fields: [timeSlotId], references: [id])
-  specialist StaffProfile?  @relation(fields: [specialistId], references: [id])
+  client      ClientProfile? @relation(fields: [clientId], references: [id])
+  city        City           @relation(fields: [cityId], references: [id])
+  branch      Branch?        @relation(fields: [branchId], references: [id])
+  addressRef  Address?       @relation(fields: [addressId], references: [id])
+  timeSlot    TimeSlot?      @relation(fields: [timeSlotId], references: [id])
+  specialist  StaffProfile?  @relation(fields: [specialistId], references: [id])
+  team        Team?          @relation(fields: [teamId], references: [id])
+  package     Package?       @relation(fields: [packageId], references: [id])
+  order       Order?         @relation(fields: [orderId], references: [id])
 
-  items          BookingItem[]
-  statusHistory  BookingStatusHistory[]
-  payments       Payment[]
-  invoice        Invoice?
-  redemption     CouponRedemption?
-  giftCardTxs    GiftCardTransaction[]
-  review         Review?
-  commission     Commission?
+  items         BookingItem[]
+  beneficiaries BookingBeneficiary[]
+  statusHistory BookingStatusHistory[]
+  payments      Payment[]
+  invoice       Invoice?
+  giftCardTxs   GiftCardTransaction[]
+  review        Review?
+  commission    Commission?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   @@index([date, timeSlotId])
-  @@index([specialistId, date])
+  @@index([specialistId, startAt])
+  @@index([teamId, startAt])
   @@index([status])
   @@index([customerPhone])
   @@index([cityId])
+  @@index([orderId])
   @@map("bookings")
 }
 
-model BookingItem {
+model BookingBeneficiary {
   id        String  @id @default(uuid())
   bookingId String
-  serviceId String?
-  titleAr   String
-  titleEn   String?
-  unitPrice Decimal @db.Decimal(10, 2)
-  quantity  Int     @default(1)
-  total     Decimal @db.Decimal(10, 2)
+  name      String
+  phone     String?
+  notes     String?
+  staffId   String?
 
-  booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  service Service? @relation(fields: [serviceId], references: [id])
+  booking Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  staff   StaffProfile? @relation(fields: [staffId], references: [id])
+  items   BookingItem[]
+
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+  @@map("booking_beneficiaries")
+}
+
+model BookingItem {
+  id              String  @id @default(uuid())
+  bookingId       String
+  serviceId       String?
+  variantId       String?
+  beneficiaryId   String?
+  titleAr         String
+  titleEn         String?
+  unitPrice       Decimal @db.Decimal(10, 2)
+  quantity        Int     @default(1)
+  durationMinutes Int     @default(0)
+  total           Decimal @db.Decimal(10, 2)
+
+  booking     Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  service     Service?            @relation(fields: [serviceId], references: [id])
+  variant     ServiceVariant?     @relation(fields: [variantId], references: [id])
+  beneficiary BookingBeneficiary? @relation(fields: [beneficiaryId], references: [id])
 
   @@index([bookingId])
   @@map("booking_items")
 }
 
 model BookingStatusHistory {
-  id         String        @id @default(uuid())
-  bookingId  String
-  fromStatus BookingStatus?
-  toStatus   BookingStatus
+  id          String        @id @default(uuid())
+  bookingId   String
+  fromStatus  BookingStatus?
+  toStatus    BookingStatus
   changedById String?
-  note       String?
-  createdAt  DateTime      @default(now())
+  note        String?
+  createdAt   DateTime      @default(now())
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
@@ -627,56 +988,148 @@ model Payout {
   @@map("payouts")
 }
 
+// ----------------------------- Orders --------------------------------------
+
+model Order {
+  id            String      @id @default(uuid())
+  orderNumber   String      @unique
+  clientId      String?
+  customerName  String
+  customerPhone String
+  status        OrderStatus @default(PENDING_PAYMENT)
+
+  subtotal       Decimal @db.Decimal(10, 2)
+  discountAmount Decimal @default(0) @db.Decimal(10, 2)
+  walletAmount   Decimal @default(0) @db.Decimal(10, 2)
+  pointsAmount   Decimal @default(0) @db.Decimal(10, 2)
+  vatAmount      Decimal @default(0) @db.Decimal(10, 2)
+  total          Decimal @db.Decimal(10, 2)
+  paidAmount     Decimal @default(0) @db.Decimal(10, 2)
+  currency       String  @default("SAR")
+
+  couponId    String?
+  promotionId String?
+  notes       String?
+  createdById String?
+
+  client       ClientProfile?    @relation(fields: [clientId], references: [id])
+  bookings     Booking[]
+  items        OrderItem[]
+  payments     Payment[]
+  invoices     Invoice[]
+  paymentLinks PaymentLink[]
+  redemptions  CouponRedemption[]
+  review       Review?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String        @id @default(uuid())
+  orderId   String
+  kind      OrderItemKind @default(SERVICE)
+  serviceId String?
+  packageId String?
+  variantId String?
+  titleAr   String
+  titleEn   String?
+  unitPrice Decimal       @db.Decimal(10, 2)
+  quantity  Int           @default(1)
+  total     Decimal       @db.Decimal(10, 2)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id])
+  package Package? @relation(fields: [packageId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model PaymentLink {
+  id          String            @id @default(uuid())
+  token       String            @unique
+  orderId     String
+  amount      Decimal           @db.Decimal(10, 2)
+  status      PaymentLinkStatus @default(ACTIVE)
+  expiresAt   DateTime?
+  usedAt      DateTime?
+  createdById String?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("payment_links")
+}
+
 // ----------------------------- Payments ------------------------------------
 
 model Payment {
-  id         String          @id @default(uuid())
-  bookingId  String
-  amount     Decimal         @db.Decimal(10, 2)
-  method     PaymentMethod
-  provider   PaymentProvider @default(MANUAL)
-  status     PaymentStatus   @default(UNPAID)
-  providerRef String?        @unique
-  rawPayload Json?
-  paidAt     DateTime?
+  id             String          @id @default(uuid())
+  bookingId      String?
+  orderId        String?
+  amount         Decimal         @db.Decimal(10, 2)
+  refundedAmount Decimal         @default(0) @db.Decimal(10, 2)
+  currency       String          @default("SAR")
+  method         PaymentMethod
+  provider       PaymentProvider @default(MANUAL)
+  status         PaymentStatus   @default(UNPAID)
+  providerRef    String?         @unique
+  idempotencyKey String?         @unique
+  rawPayload     Json?
+  paidAt         DateTime?
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([bookingId])
+  @@index([orderId])
   @@index([status])
   @@map("payments")
 }
 
 model Invoice {
-  id            String   @id @default(uuid())
-  bookingId     String   @unique
-  invoiceNumber String   @unique
-  vatNumber     String?
-  subtotal      Decimal  @db.Decimal(10, 2)
-  vatAmount     Decimal  @db.Decimal(10, 2)
-  total         Decimal  @db.Decimal(10, 2)
-  issuedAt      DateTime @default(now())
-  pdfUrl        String?
+  id             String   @id @default(uuid())
+  bookingId      String?  @unique
+  orderId        String?  @unique
+  invoiceNumber  String   @unique
+  sequenceNumber Int?
+  vatNumber      String?
+  subtotal       Decimal  @db.Decimal(10, 2)
+  vatAmount      Decimal  @db.Decimal(10, 2)
+  total          Decimal  @db.Decimal(10, 2)
+  zatcaQr        String?
+  issuedAt       DateTime @default(now())
+  pdfUrl         String?
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("invoices")
 }
 
 model Coupon {
-  id          String       @id @default(uuid())
-  code        String       @unique
-  type        DiscountType @default(PERCENTAGE)
-  value       Decimal      @db.Decimal(10, 2)
-  minOrder    Decimal      @default(0) @db.Decimal(10, 2)
-  maxUses     Int?
-  usedCount   Int          @default(0)
-  startsAt    DateTime?
-  endsAt      DateTime?
-  isActive    Boolean      @default(true)
+  id        String       @id @default(uuid())
+  code      String       @unique
+  type      DiscountType @default(PERCENTAGE)
+  value     Decimal      @db.Decimal(10, 2)
+  minOrder  Decimal      @default(0) @db.Decimal(10, 2)
+  maxUses   Int?
+  usedCount Int          @default(0)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  isActive  Boolean      @default(true)
 
   redemptions CouponRedemption[]
 
@@ -687,18 +1140,48 @@ model Coupon {
 }
 
 model CouponRedemption {
-  id             String  @id @default(uuid())
+  id             String   @id @default(uuid())
   couponId       String
-  bookingId      String  @unique
+  orderId        String   @unique
   clientId       String?
-  discountAmount Decimal @db.Decimal(10, 2)
+  discountAmount Decimal  @db.Decimal(10, 2)
   createdAt      DateTime @default(now())
 
-  coupon  Coupon  @relation(fields: [couponId], references: [id])
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  coupon Coupon @relation(fields: [couponId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([couponId])
   @@map("coupon_redemptions")
+}
+
+model Promotion {
+  id             String         @id @default(uuid())
+  code           String?        @unique
+  titleAr        String
+  titleEn        String?
+  descriptionAr  String?
+  type           DiscountType   @default(PERCENTAGE)
+  value          Decimal        @db.Decimal(10, 2)
+  scope          PromotionScope @default(ALL)
+  categoryId     String?
+  serviceId      String?
+  packageId      String?
+  cityId         String?
+  minOrder       Decimal        @default(0) @db.Decimal(10, 2)
+  maxDiscount    Decimal?       @db.Decimal(10, 2)
+  startsAt       DateTime?
+  endsAt         DateTime?
+  usageLimit     Int?
+  usedCount      Int            @default(0)
+  perClientLimit Int            @default(1)
+  imageUrl       String?
+  isActive       Boolean        @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, startsAt, endsAt])
+  @@map("promotions")
 }
 
 model GiftCard {
@@ -737,11 +1220,94 @@ model GiftCardTransaction {
   @@map("gift_card_transactions")
 }
 
+// ----------------------------- Loyalty & wallet ----------------------------
+
+model Wallet {
+  id       String  @id @default(uuid())
+  clientId String  @unique
+  balance  Decimal @default(0) @db.Decimal(10, 2)
+  currency String  @default("SAR")
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id           String       @id @default(uuid())
+  walletId     String
+  type         WalletTxType
+  amount       Decimal      @db.Decimal(10, 2)
+  balanceAfter Decimal      @db.Decimal(10, 2)
+  reference    String?
+  note         String?
+  createdAt    DateTime     @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+model LoyaltyAccount {
+  id             String     @id @default(uuid())
+  clientId       String     @unique
+  pointsBalance  Int        @default(0)
+  lifetimePoints Int        @default(0)
+  tier           ClientTier @default(SILVER)
+
+  client       ClientProfile        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("loyalty_accounts")
+}
+
+model LoyaltyTransaction {
+  id           String        @id @default(uuid())
+  accountId    String
+  type         LoyaltyTxType
+  points       Int
+  balanceAfter Int
+  orderId      String?
+  expiresAt    DateTime?
+  note         String?
+  createdAt    DateTime      @default(now())
+
+  account LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@map("loyalty_transactions")
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  clientId  String
+  serviceId String?
+  packageId String?
+  createdAt DateTime @default(now())
+
+  client  ClientProfile @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service Service?      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  package Package?      @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, serviceId])
+  @@unique([clientId, packageId])
+  @@map("favorites")
+}
+
 // ----------------------------- Engagement ----------------------------------
 
 model Review {
   id          String       @id @default(uuid())
   bookingId   String       @unique
+  orderId     String?      @unique
   clientId    String?
   staffId     String?
   rating      Int
@@ -750,6 +1316,7 @@ model Review {
   publishedAt DateTime?
 
   booking Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  order   Order?        @relation(fields: [orderId], references: [id])
   client  User?         @relation(fields: [clientId], references: [id])
   staff   StaffProfile? @relation(fields: [staffId], references: [id])
 
@@ -761,24 +1328,24 @@ model Review {
 }
 
 model Ticket {
-  id            String       @id @default(uuid())
-  ticketNumber  String       @unique
-  clientId      String?
-  customerName  String
-  customerPhone String
-  category      String?
-  priority      Priority     @default(MEDIUM)
-  status        TicketStatus @default(NEW)
-  subject       String
-  description   String
+  id              String       @id @default(uuid())
+  ticketNumber    String       @unique
+  clientId        String?
+  customerName    String
+  customerPhone   String
+  category        String?
+  priority        Priority     @default(MEDIUM)
+  status          TicketStatus @default(NEW)
+  subject         String
+  description     String
   resolutionNotes String?
-  assignedToId  String?
-  createdById   String?
-  resolvedAt    DateTime?
+  assignedToId    String?
+  createdById     String?
+  resolvedAt      DateTime?
 
-  assignedTo User?          @relation("TicketAssignee", fields: [assignedToId], references: [id])
-  createdBy  User?          @relation("TicketCreator", fields: [createdById], references: [id])
-  client     User?          @relation("TicketClient", fields: [clientId], references: [id])
+  assignedTo User?           @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  createdBy  User?           @relation("TicketCreator", fields: [createdById], references: [id])
+  client     User?           @relation("TicketClient", fields: [clientId], references: [id])
   messages   TicketMessage[]
 
   createdAt DateTime @default(now())
@@ -790,12 +1357,12 @@ model Ticket {
 }
 
 model TicketMessage {
-  id        String   @id @default(uuid())
-  ticketId  String
-  authorId  String?
-  body      String
-  isInternal Boolean @default(false)
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  ticketId   String
+  authorId   String?
+  body       String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
@@ -821,6 +1388,23 @@ model CmsBlock {
   @@map("cms_blocks")
 }
 
+model CmsPage {
+  id               String   @id @default(uuid())
+  slug             String   @unique
+  titleAr          String
+  titleEn          String?
+  contentAr        String
+  contentEn        String?
+  metaTitleAr      String?
+  metaDescriptionAr String?
+  isPublished      Boolean  @default(true)
+  updatedById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("cms_pages")
+}
+
 model Faq {
   id         String  @id @default(uuid())
   category   String?
@@ -837,6 +1421,23 @@ model Faq {
   @@map("faqs")
 }
 
+model ContactMessage {
+  id          String               @id @default(uuid())
+  name        String
+  phone       String
+  email       String?
+  subject     String?
+  message     String
+  status      ContactMessageStatus @default(NEW)
+  handledById String?
+  replyNote   String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@map("contact_messages")
+}
+
 model GalleryItem {
   id        String  @id @default(uuid())
   imageUrl  String
@@ -847,6 +1448,7 @@ model GalleryItem {
   isActive  Boolean @default(true)
 
   createdAt DateTime @default(now())
+
   @@map("gallery_items")
 }
 
@@ -857,6 +1459,8 @@ model Setting {
 
   @@map("settings")
 }
+
+// ----------------------------- Ops -----------------------------------------
 
 model AuditLog {
   id        String   @id @default(uuid())
@@ -876,16 +1480,34 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model NotificationTemplate {
+  id       String              @id @default(uuid())
+  key      String
+  channel  NotificationChannel
+  locale   String              @default("ar")
+  subject  String?
+  body     String
+  isActive Boolean             @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([key, channel, locale])
+  @@map("notification_templates")
+}
+
 model Notification {
-  id        String              @id @default(uuid())
-  userId    String?
-  channel   NotificationChannel
-  template  String
-  payload   Json?
-  status    NotificationStatus  @default(QUEUED)
-  sentAt    DateTime?
-  error     String?
-  createdAt DateTime            @default(now())
+  id          String             @id @default(uuid())
+  userId      String?
+  channel     NotificationChannel
+  template    String
+  recipient   String?
+  payload     Json?
+  status      NotificationStatus @default(QUEUED)
+  providerRef String?
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime           @default(now())
 
   user User? @relation(fields: [userId], references: [id])
 
