@@ -48,12 +48,13 @@ double-booking, money checks):
 
 ```bash
 psql "$DATABASE_URL" -f prisma/sql/01-extra-constraints.sql
+psql "$DATABASE_URL" -f prisma/sql/02-booking-overlap.sql
 ```
 
 Verify the index exists:
 
 ```sql
-SELECT indexname FROM pg_indexes WHERE tablename = 'bookings';
+SELECT tgname FROM pg_trigger WHERE tgname = 'bookings_no_overlap_trigger';
 ```
 
 ## 4. Seed
@@ -108,4 +109,4 @@ docker compose up --build
 - Staging/production: `npm run prisma:deploy`
 - Never edit an applied migration. Create a new one.
 - After any migration that changes `bookings`, re-apply
-  `prisma/sql/01-extra-constraints.sql` if the index was dropped.
+  `prisma/sql/02-booking-overlap.sql` if the trigger was dropped.

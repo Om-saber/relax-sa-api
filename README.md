@@ -33,6 +33,7 @@ npm install
 # 3. Create the schema + constraints
 npm run prisma:migrate -- --name init
 psql "$DATABASE_URL" -f prisma/sql/01-extra-constraints.sql
+psql "$DATABASE_URL" -f prisma/sql/02-booking-overlap.sql
 
 # 4. Seed reference data
 npm run db:seed
