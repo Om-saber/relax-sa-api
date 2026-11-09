@@ -313,10 +313,10 @@ export class AuthService {
   // ---------------------------------------------------------------------------
 
   private async issueTokens(user: UserWithRole) {
-    const permissions =
-      user.role === UserRole.ADMIN && user.roleRef
-        ? user.roleRef.permissions.map((rp) => rp.permission.key)
-        : [];
+    // FIX: return permissions for ALL roles (ADMIN + STAFF)
+    const permissions = user.roleRef
+      ? user.roleRef.permissions.map((rp) => rp.permission.key)
+      : [];
 
     const payload: JwtPayload = {
       sub: user.id,
@@ -359,10 +359,9 @@ export class AuthService {
       email: user.email,
       role: user.role,
       avatarUrl: user.staffProfile?.avatarUrl ?? null,
-      permissions:
-        user.role === UserRole.ADMIN && user.roleRef
-          ? user.roleRef.permissions.map((rp) => rp.permission.key)
-          : [],
+      permissions: user.roleRef
+        ? user.roleRef.permissions.map((rp) => rp.permission.key)
+        : [],
       createdAt: user.createdAt,
     };
   }
