@@ -2,11 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { BookingStatus, BookingType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { QuerySlotsDto } from './dto/query-slots.dto';
 import type { CreateBookingDto } from './dto/create-booking.dto';
+import type { RescheduleBookingDto } from './dto/reschedule-booking.dto';
 
 // Statuses that "occupy" a slot (don't count cancelled/no-show)
 const OCCUPYING_STATUSES: BookingStatus[] = [
@@ -307,6 +309,161 @@ export class BookingsService {
         total: Number(i.total),
       })),
     };
+  }
+
+  // ─────────────────────────────────────────────────────
+  // GET /bookings/me — Client's bookings
+  // ─────────────────────────────────────────────────────
+  async getMyBookings(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { phone: true, clientProfile: { select: { id: true } } },
+    });
+    if (!user) {
+      throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'المستخدمة غير موجودة' });
+    }
+
+    const where: Prisma.BookingWhereInput = { deletedAt: null };
+    const orConditions: Prisma.BookingWhereInput[] = [];
+    if (user.clientProfile?.id) orConditions.push({ clientId: user.clientProfile.id });
+    if (user.phone) orConditions.push({ customerPhone: user.phone });
+
+    if (orConditions.length === 0) return [];
+    where.OR = orConditions;
+
+    return this.prisma.booking.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        items: true,
+        timeSlot: { select: { key: true, labelAr: true, startTime: true, endTime: true } },
+        city: { select: { key: true, nameAr: true } },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // GET /bookings/:id — Single booking (ownership check)
+  // ─────────────────────────────────────────────────────
+  async getBookingById(id: string, userId: string) {
+    const booking = await this.findOwnedBooking(id, userId);
+    return this.prisma.booking.findUnique({
+      where: { id: booking.id },
+      include: {
+        items: true,
+        timeSlot: { select: { key: true, labelAr: true, startTime: true, endTime: true } },
+        city: { select: { key: true, nameAr: true } },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // PATCH /bookings/:id/cancel — Cancel booking
+  // ─────────────────────────────────────────────────────
+  async cancelBooking(id: string, reason: string | undefined, userId: string) {
+    const booking = await this.findOwnedBooking(id, userId);
+
+    const cancellableStatuses: BookingStatus[] = [BookingStatus.PENDING, BookingStatus.CONFIRMED];
+    if (!cancellableStatuses.includes(booking.status)) {
+      throw new BadRequestException({
+        code: 'CANNOT_CANCEL',
+        message: 'لا يمكن إلغاء الحجز في حالته الحالية',
+      });
+    }
+
+    return this.prisma.booking.update({
+      where: { id },
+      data: {
+        status: BookingStatus.CANCELLED,
+        cancelledAt: new Date(),
+        cancelReason: reason?.trim() || null,
+      },
+      include: {
+        items: true,
+        timeSlot: { select: { key: true, labelAr: true } },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // PATCH /bookings/:id/reschedule — Reschedule booking
+  // ─────────────────────────────────────────────────────
+  async rescheduleBooking(id: string, dto: RescheduleBookingDto, userId: string) {
+    const booking = await this.findOwnedBooking(id, userId);
+
+    const reschedulableStatuses: BookingStatus[] = [BookingStatus.PENDING, BookingStatus.CONFIRMED];
+    if (!reschedulableStatuses.includes(booking.status)) {
+      throw new BadRequestException({
+        code: 'CANNOT_RESCHEDULE',
+        message: 'لا يمكن إعادة جدولة الحجز في حالته الحالية',
+      });
+    }
+
+    const dateObj = this.parseDate(dto.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dateObj < today) {
+      throw new BadRequestException({ code: 'DATE_IN_PAST', message: 'لا يمكن الحجز في تاريخ ماضي' });
+    }
+
+    const slot = await this.prisma.timeSlot.findUnique({
+      where: { key: dto.timeSlotKey },
+      select: { id: true, startTime: true, endTime: true, isActive: true },
+    });
+    if (!slot || !slot.isActive) {
+      throw new BadRequestException({ code: 'TIMESLOT_NOT_FOUND', message: 'الموعد غير متاح' });
+    }
+
+    const startAt = new Date(`${dto.date}T${slot.startTime}:00+03:00`);
+    const endAt = new Date(`${dto.date}T${slot.endTime}:00+03:00`);
+    if (endAt <= startAt) endAt.setUTCDate(endAt.getUTCDate() + 1);
+
+    return this.prisma.booking.update({
+      where: { id },
+      data: {
+        date: dateObj,
+        timeSlotId: slot.id,
+        startAt,
+        endAt,
+        status: BookingStatus.PENDING,
+      },
+      include: {
+        items: true,
+        timeSlot: { select: { key: true, labelAr: true, startTime: true, endTime: true } },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // Helper: find owned booking (admin can access any)
+  // ─────────────────────────────────────────────────────
+  private async findOwnedBooking(id: string, userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { phone: true, role: true, clientProfile: { select: { id: true } } },
+    });
+    if (!user) {
+      throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'المستخدمة غير موجودة' });
+    }
+
+    const where: Prisma.BookingWhereInput = { id, deletedAt: null };
+
+    if (user.role !== UserRole.ADMIN) {
+      const orConditions: Prisma.BookingWhereInput[] = [];
+      if (user.clientProfile?.id) orConditions.push({ clientId: user.clientProfile.id });
+      if (user.phone) orConditions.push({ customerPhone: user.phone });
+
+      if (orConditions.length === 0) {
+        throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
+      }
+      where.OR = orConditions;
+    }
+
+    const booking = await this.prisma.booking.findFirst({ where });
+    if (!booking) {
+      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
+    }
+    return booking;
   }
   // ─────────────────────────────────────────────────────
   // Helpers
