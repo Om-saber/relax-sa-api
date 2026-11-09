@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { AdminUsersService } from './admin-users.service';
 import { AdminRolesService } from './admin-roles.service';
+import { AdminBookingsService } from './admin-bookings.service';
+import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -15,6 +17,7 @@ export class AdminController {
   constructor(
     private readonly users: AdminUsersService,
     private readonly roles: AdminRolesService,
+    private readonly bookings: AdminBookingsService,
   ) {}
 
   @Get('users')
@@ -72,4 +75,19 @@ export class AdminController {
   updateRolePermissions(@Param('id') id: string, @Body() dto: UpdateRolePermissionsDto) {
     return this.roles.updateRolePermissions(id, dto);
   }
+
+  @Get('bookings')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'قائمة الحجوزات (مع فلاتر + pagination)' })
+  listBookings(@Query() query: QueryAdminBookingsDto) {
+    return this.bookings.list(query);
+  }
+
+  @Patch('bookings/:id/status')
+  @Permissions('editBookings')
+  @ApiOperation({ summary: 'تحديث حالة حجز' })
+  updateBookingStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.bookings.updateStatus(id, status);
+  }
+
 }
