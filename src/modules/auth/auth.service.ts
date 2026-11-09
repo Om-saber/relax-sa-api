@@ -358,6 +358,8 @@ export class AuthService {
       phone: user.phone,
       email: user.email,
       role: user.role,
+      roleTitle: user.roleRef?.nameAr ?? null,  // ← NEW: e.g. "المشرف الميداني"
+      roleKey: user.roleRef?.key ?? null,       // ← NEW: e.g. "supervisor"
       avatarUrl: user.staffProfile?.avatarUrl ?? null,
       permissions: user.roleRef
         ? user.roleRef.permissions.map((rp) => rp.permission.key)
