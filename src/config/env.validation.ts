@@ -29,6 +29,13 @@ const envSchema = z.object({
   MSEGAT_USERNAME: z.string().optional().default(''),
   MSEGAT_API_KEY: z.string().optional().default(''),
 
+  // PayPal
+  PAYPAL_CLIENT_ID: z.string().optional().default(''),
+  PAYPAL_SECRET: z.string().optional().default(''),
+  PAYPAL_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+  PAYPAL_BASE_URL: z.string().url().default('https://api-m.sandbox.paypal.com'),
+  FRONTEND_URL: z.string().url().default('http://localhost:5173'),
+
   SWAGGER_ENABLED: booleanish.default(true),
 
   SEED_ADMIN_EMAIL: z.string().email().optional().default('admin@relax.sa'),

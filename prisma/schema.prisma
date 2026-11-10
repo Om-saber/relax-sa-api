@@ -92,6 +92,7 @@ enum PaymentProvider {
   MOYASAR
   TABBY
   TAMARA
+  PAYPAL
 }
 
 enum OrderStatus {
