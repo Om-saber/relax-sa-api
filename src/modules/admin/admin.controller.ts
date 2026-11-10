@@ -5,7 +5,11 @@ import { AdminUsersService } from './admin-users.service';
 import { AdminRolesService } from './admin-roles.service';
 import { AdminBookingsService } from './admin-bookings.service';
 import { AdminOverviewService } from './admin-overview.service';
+import { AdminServicesService } from './admin-services.service';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
+import { CreateServiceDto } from './dto/create-service.dto';
+import { UpdateServiceDto } from './dto/update-service.dto';
+import { QueryAdminServicesDto } from './dto/query-admin-services.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -20,6 +24,7 @@ export class AdminController {
     private readonly roles: AdminRolesService,
     private readonly bookings: AdminBookingsService,
     private readonly overview: AdminOverviewService,
+    private readonly services: AdminServicesService,
   ) {}
   @Get('overview')
   @Permissions('viewBookings')
@@ -97,6 +102,44 @@ export class AdminController {
   @ApiOperation({ summary: 'تحديث حالة حجز' })
   updateBookingStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.bookings.updateStatus(id, status);
+  }
+
+
+  // ═══════════════ Services (CRUD) ═══════════════
+
+  @Get('services')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'قائمة الخدمات (مع فلاتر)' })
+  listServices(@Query() query: QueryAdminServicesDto) {
+    return this.services.list(query);
+  }
+
+  @Post('services')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'إنشاء خدمة جديدة' })
+  createService(@Body() dto: CreateServiceDto) {
+    return this.services.create(dto);
+  }
+
+  @Patch('services/:id')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'تعديل خدمة' })
+  updateService(@Param('id') id: string, @Body() dto: UpdateServiceDto) {
+    return this.services.update(id, dto);
+  }
+
+  @Patch('services/:id/toggle')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'تفعيل/تعطيل خدمة' })
+  toggleService(@Param('id') id: string) {
+    return this.services.toggle(id);
+  }
+
+  @Delete('services/:id')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'حذف خدمة (لو مش مستخدمة)' })
+  deleteService(@Param('id') id: string) {
+    return this.services.remove(id);
   }
 
 }
