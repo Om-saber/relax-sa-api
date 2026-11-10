@@ -6,10 +6,13 @@ import { AdminRolesService } from './admin-roles.service';
 import { AdminBookingsService } from './admin-bookings.service';
 import { AdminOverviewService } from './admin-overview.service';
 import { AdminServicesService } from './admin-services.service';
+import { AdminCitiesService } from './admin-cities.service';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { QueryAdminServicesDto } from './dto/query-admin-services.dto';
+import { CreateCityDto } from './dto/create-city.dto';
+import { UpdateCityDto } from './dto/update-city.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -25,6 +28,7 @@ export class AdminController {
     private readonly bookings: AdminBookingsService,
     private readonly overview: AdminOverviewService,
     private readonly services: AdminServicesService,
+    private readonly cities: AdminCitiesService,
   ) {}
   @Get('overview')
   @Permissions('viewBookings')
@@ -142,4 +146,41 @@ export class AdminController {
     return this.services.remove(id);
   }
 
+
+
+  // ===== Cities (CRUD) =====
+  @Get('cities')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'list cities' })
+  listCities() {
+    return this.cities.list();
+  }
+
+  @Post('cities')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'create city' })
+  createCity(@Body() dto: CreateCityDto) {
+    return this.cities.create(dto);
+  }
+
+  @Patch('cities/:id')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'update city' })
+  updateCity(@Param('id') id: string, @Body() dto: UpdateCityDto) {
+    return this.cities.update(id, dto);
+  }
+
+  @Patch('cities/:id/toggle')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'toggle city' })
+  toggleCity(@Param('id') id: string) {
+    return this.cities.toggle(id);
+  }
+
+  @Delete('cities/:id')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'delete city' })
+  deleteCity(@Param('id') id: string) {
+    return this.cities.remove(id);
+  }
 }
