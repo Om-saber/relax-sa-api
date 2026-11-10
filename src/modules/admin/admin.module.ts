@@ -6,9 +6,10 @@ import { AdminBookingsService } from './admin-bookings.service';
 import { AdminOverviewService } from './admin-overview.service';
 import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
+import { AdminClientsService } from './admin-clients.service';
 
 @Module({
   controllers: [AdminController],
-  providers: [AdminUsersService, AdminRolesService, AdminBookingsService, AdminOverviewService, AdminServicesService, AdminCitiesService],
+  providers: [AdminUsersService, AdminRolesService, AdminBookingsService, AdminOverviewService, AdminServicesService, AdminCitiesService, AdminClientsService],
 })
 export class AdminModule {}

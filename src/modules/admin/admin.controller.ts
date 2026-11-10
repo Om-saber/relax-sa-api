@@ -7,11 +7,14 @@ import { AdminBookingsService } from './admin-bookings.service';
 import { AdminOverviewService } from './admin-overview.service';
 import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
+import { AdminClientsService } from './admin-clients.service';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { QueryAdminServicesDto } from './dto/query-admin-services.dto';
 import { CreateCityDto } from './dto/create-city.dto';
+import { QueryAdminClientsDto } from './dto/query-admin-clients.dto';
+import { AddClientNoteDto } from './dto/add-client-note.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -29,6 +32,7 @@ export class AdminController {
     private readonly overview: AdminOverviewService,
     private readonly services: AdminServicesService,
     private readonly cities: AdminCitiesService,
+    private readonly clientsService: AdminClientsService,
   ) {}
   @Get('overview')
   @Permissions('viewBookings')
@@ -182,5 +186,29 @@ export class AdminController {
   @ApiOperation({ summary: 'delete city' })
   deleteCity(@Param('id') id: string) {
     return this.cities.remove(id);
+  }
+
+
+  // ===== Clients (CRM) =====
+
+  @Get('clients')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'list clients' })
+  listClients(@Query() query: QueryAdminClientsDto) {
+    return this.clientsService.list(query);
+  }
+
+  @Get('clients/:id')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'client details with bookings and payments' })
+  getClient(@Param('id') id: string) {
+    return this.clientsService.getOne(id);
+  }
+
+  @Post('clients/:id/notes')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'add internal note to client' })
+  addClientNote(@Param('id') id: string, @Body() dto: AddClientNoteDto) {
+    return this.clientsService.addNote(id, dto.note);
   }
 }
