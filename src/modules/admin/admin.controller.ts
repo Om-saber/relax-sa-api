@@ -4,6 +4,7 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { AdminUsersService } from './admin-users.service';
 import { AdminRolesService } from './admin-roles.service';
 import { AdminBookingsService } from './admin-bookings.service';
+import { AdminOverviewService } from './admin-overview.service';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -18,7 +19,15 @@ export class AdminController {
     private readonly users: AdminUsersService,
     private readonly roles: AdminRolesService,
     private readonly bookings: AdminBookingsService,
+    private readonly overview: AdminOverviewService,
   ) {}
+  @Get('overview')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'Dashboard overview stats (revenue, bookings, clients, staff)' })
+  getOverview() {
+    return this.overview.getOverview();
+  }
+
 
   @Get('users')
   @Permissions('manageStaff')
