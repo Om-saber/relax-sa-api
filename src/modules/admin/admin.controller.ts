@@ -9,6 +9,7 @@ import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
 import { AdminClientsService } from './admin-clients.service';
 import { AdminSettingsService } from './admin-settings.service';
+import { AdminReportsService } from './admin-reports.service';
 import { AdminTicketsService } from './admin-tickets.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { AdminBlackoutsService } from './admin-blackouts.service';
@@ -41,6 +42,7 @@ export class AdminController {
     private readonly cities: AdminCitiesService,
     private readonly clientsService: AdminClientsService,
     private readonly settingsService: AdminSettingsService,
+    private readonly reportsService: AdminReportsService,
     private readonly ticketsService: AdminTicketsService,
     private readonly blackoutsService: AdminBlackoutsService,
   ) {}
@@ -207,6 +209,15 @@ export class AdminController {
   @ApiOperation({ summary: 'Deactivate a blackout date' })
   deleteBlackout(@Param('id') id: string) {
     return this.blackoutsService.remove(id);
+  }
+
+  // ===== Reports =====
+
+  @Get('reports/overview')
+  @Permissions('viewReports')
+  @ApiOperation({ summary: 'Get reports overview (KPIs + sales by city + top services)' })
+  getReportsOverview() {
+    return this.reportsService.getOverview();
   }
 
   // ===== Tickets (CRM) =====
