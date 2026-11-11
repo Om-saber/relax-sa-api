@@ -169,6 +169,20 @@ export class AdminController {
     return this.users.updateOffDays(id, dto.weekdays);
   }
 
+  @Get('settings/cms')
+  @Permissions('manageContent')
+  @ApiOperation({ summary: 'Get CMS settings' })
+  getCmsSettings() {
+    return this.settingsService.getCmsSettings();
+  }
+
+  @Patch('settings/cms')
+  @Permissions('manageContent')
+  @ApiOperation({ summary: 'Update CMS settings' })
+  updateCmsSettings(@Body() body: Record<string, unknown>) {
+    return this.settingsService.updateCmsSettings(body);
+  }
+
   // ===== Blackouts (Capacity) =====
 
   @Get('blackouts')
