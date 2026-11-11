@@ -9,6 +9,8 @@ import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
 import { AdminClientsService } from './admin-clients.service';
 import { AdminSettingsService } from './admin-settings.service';
+import { AdminTicketsService } from './admin-tickets.service';
+import { CreateTicketDto } from './dto/create-ticket.dto';
 import { AdminBlackoutsService } from './admin-blackouts.service';
 import { CreateBlackoutDto } from './dto/create-blackout.dto';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
@@ -39,6 +41,7 @@ export class AdminController {
     private readonly cities: AdminCitiesService,
     private readonly clientsService: AdminClientsService,
     private readonly settingsService: AdminSettingsService,
+    private readonly ticketsService: AdminTicketsService,
     private readonly blackoutsService: AdminBlackoutsService,
   ) {}
   @Get('overview')
@@ -204,6 +207,32 @@ export class AdminController {
   @ApiOperation({ summary: 'Deactivate a blackout date' })
   deleteBlackout(@Param('id') id: string) {
     return this.blackoutsService.remove(id);
+  }
+
+  // ===== Tickets (CRM) =====
+
+  @Get('tickets')
+  @Permissions('manageComplaints')
+  @ApiOperation({ summary: 'List all tickets' })
+  listTickets() {
+    return this.ticketsService.list();
+  }
+
+  @Post('tickets')
+  @Permissions('manageComplaints')
+  @ApiOperation({ summary: 'Create a new ticket' })
+  createTicket(@Body() dto: CreateTicketDto) {
+    return this.ticketsService.create(dto);
+  }
+
+  @Patch('tickets/:id/status')
+  @Permissions('manageComplaints')
+  @ApiOperation({ summary: 'Update ticket status' })
+  updateTicketStatus(
+    @Param('id') id: string,
+    @Body() body: { status: any; resolutionNotes?: string },
+  ) {
+    return this.ticketsService.updateStatus(id, body.status, body.resolutionNotes);
   }
 
   // ===== Settings =====
