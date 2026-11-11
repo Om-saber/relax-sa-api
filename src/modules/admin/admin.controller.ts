@@ -8,6 +8,7 @@ import { AdminOverviewService } from './admin-overview.service';
 import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
 import { AdminClientsService } from './admin-clients.service';
+import { AdminSettingsService } from './admin-settings.service';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -35,6 +36,7 @@ export class AdminController {
     private readonly services: AdminServicesService,
     private readonly cities: AdminCitiesService,
     private readonly clientsService: AdminClientsService,
+    private readonly settingsService: AdminSettingsService,
   ) {}
   @Get('overview')
   @Permissions('viewBookings')
@@ -162,6 +164,22 @@ export class AdminController {
     @Body() dto: UpdateOffDaysDto,
   ) {
     return this.users.updateOffDays(id, dto.weekdays);
+  }
+
+  // ===== Settings =====
+
+  @Get('settings/booking')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'Get booking settings' })
+  getBookingSettings() {
+    return this.settingsService.getBookingSettings();
+  }
+
+  @Patch('settings/booking')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'Update booking settings' })
+  updateBookingSettings(@Body() body: Record<string, unknown>) {
+    return this.settingsService.updateBookingSettings(body);
   }
 
   // ===== Cities (CRUD) =====
