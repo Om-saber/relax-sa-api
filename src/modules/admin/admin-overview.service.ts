@@ -161,12 +161,52 @@ export class AdminOverviewService {
     const totalRevenueNum = Number(totalRevenue._sum.amount || 0);
     const completedBookings = bookingsStats.completed;
 
+    // ── Capacity (per active city) ──────────────────
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+    const activeCities = await this.prisma.city.findMany({
+      where: { isActive: true },
+      select: {
+        id: true, key: true, nameAr: true, nameEn: true,
+        maxDailyCapacity: true, operatingHours: true,
+      },
+      orderBy: { nameAr: 'asc' },
+    });
+
+    const todayBookingsByCity = await this.prisma.booking.groupBy({
+      by: ['cityId'],
+      where: {
+        deletedAt: null,
+        date: { gte: todayStart, lt: tomorrowStart },
+        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.NO_SHOW] },
+      },
+      _count: { _all: true },
+    });
+
+    const todayCountMap = new Map(
+      todayBookingsByCity.map((r) => [r.cityId, r._count._all]),
+    );
+
+    const capacity = activeCities.map((c) => ({
+      cityId: c.id,
+      cityKey: c.key,
+      cityName: c.nameAr,
+      cityNameEn: c.nameEn,
+      bookingsToday: todayCountMap.get(c.id) ?? 0,
+      maxDailyCapacity: c.maxDailyCapacity,
+      operatingHours: c.operatingHours ?? '',
+    }));
+
     return {
       revenue: {
         total: totalRevenueNum,
         today: Number(todayRevenue._sum.amount || 0),
         thisMonth: Number(monthRevenue._sum.amount || 0),
       },
+      capacity,
       bookings: bookingsStats,
       clients: {
         total: totalClients,
