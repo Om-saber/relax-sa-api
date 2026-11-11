@@ -15,6 +15,7 @@ import { QueryAdminServicesDto } from './dto/query-admin-services.dto';
 import { CreateCityDto } from './dto/create-city.dto';
 import { QueryAdminClientsDto } from './dto/query-admin-clients.dto';
 import { AddClientNoteDto } from './dto/add-client-note.dto';
+import { AssignSpecialistDto } from './dto/assign-specialist.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -188,6 +189,13 @@ export class AdminController {
     return this.cities.remove(id);
   }
 
+
+  @Patch('bookings/:id/assign')
+  @Permissions('editBookings')
+  @ApiOperation({ summary: 'Assign specialist to booking (with double-booking guard)' })
+  assignSpecialist(@Param('id') id: string, @Body() dto: AssignSpecialistDto) {
+    return this.bookings.assignSpecialist(id, dto.specialistId);
+  }
 
   // ===== Clients (CRM) =====
 

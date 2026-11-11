@@ -20,6 +20,16 @@ const userPublicSelect = {
   lastLoginAt: true,
   createdAt: true,
   roleRef: { select: { key: true, nameAr: true, nameEn: true } },
+  staffProfile: {
+    select: {
+      id: true,
+      staffCode: true,
+      status: true,
+      roleTitle: true,
+      rating: true,
+      commissionRate: true,
+    },
+  },
 } satisfies Prisma.UserSelect;
 
 @Injectable()
