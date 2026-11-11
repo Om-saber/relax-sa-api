@@ -9,6 +9,8 @@ import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
 import { AdminClientsService } from './admin-clients.service';
 import { AdminSettingsService } from './admin-settings.service';
+import { AdminBlackoutsService } from './admin-blackouts.service';
+import { CreateBlackoutDto } from './dto/create-blackout.dto';
 import { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -37,6 +39,7 @@ export class AdminController {
     private readonly cities: AdminCitiesService,
     private readonly clientsService: AdminClientsService,
     private readonly settingsService: AdminSettingsService,
+    private readonly blackoutsService: AdminBlackoutsService,
   ) {}
   @Get('overview')
   @Permissions('viewBookings')
@@ -164,6 +167,29 @@ export class AdminController {
     @Body() dto: UpdateOffDaysDto,
   ) {
     return this.users.updateOffDays(id, dto.weekdays);
+  }
+
+  // ===== Blackouts (Capacity) =====
+
+  @Get('blackouts')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'List active blackout dates' })
+  listBlackouts() {
+    return this.blackoutsService.list();
+  }
+
+  @Post('blackouts')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'Create a blackout date' })
+  createBlackout(@Body() dto: CreateBlackoutDto) {
+    return this.blackoutsService.create(dto);
+  }
+
+  @Delete('blackouts/:id')
+  @Permissions('manageServices')
+  @ApiOperation({ summary: 'Deactivate a blackout date' })
+  deleteBlackout(@Param('id') id: string) {
+    return this.blackoutsService.remove(id);
   }
 
   // ===== Settings =====
