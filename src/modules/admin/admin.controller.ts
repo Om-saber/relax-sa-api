@@ -16,6 +16,7 @@ import { CreateCityDto } from './dto/create-city.dto';
 import { QueryAdminClientsDto } from './dto/query-admin-clients.dto';
 import { AddClientNoteDto } from './dto/add-client-note.dto';
 import { AssignSpecialistDto } from './dto/assign-specialist.dto';
+import { UpdateOffDaysDto } from './dto/update-off-days.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -152,6 +153,16 @@ export class AdminController {
   }
 
 
+
+  @Patch('staff-profiles/:id/off-days')
+  @Permissions('manageStaff')
+  @ApiOperation({ summary: 'Update weekly off-days for a staff member' })
+  updateStaffOffDays(
+    @Param('id') id: string,
+    @Body() dto: UpdateOffDaysDto,
+  ) {
+    return this.users.updateOffDays(id, dto.weekdays);
+  }
 
   // ===== Cities (CRUD) =====
   @Get('cities')

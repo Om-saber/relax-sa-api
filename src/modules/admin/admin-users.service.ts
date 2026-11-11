@@ -247,4 +247,33 @@ export class AdminUsersService {
       message: 'تم إعادة تعيين كلمة المرور. يرجى إبلاغ الموظفة بكلمة المرور الجديدة.',
     };
   }
+
+  async updateOffDays(staffProfileId: string, weekdays: number[]) {
+    const staff = await this.prisma.staffProfile.findUnique({
+      where: { id: staffProfileId },
+      select: { id: true },
+    });
+    if (!staff) {
+      throw new NotFoundException({
+        code: 'STAFF_NOT_FOUND',
+        message: 'الموظفة غير موجودة',
+      });
+    }
+
+    const uniqueDays = Array.from(new Set(weekdays)).filter(
+      (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.staffOffDay.deleteMany({ where: { staffId: staffProfileId } }),
+      ...uniqueDays.map((weekday) =>
+        this.prisma.staffOffDay.create({
+          data: { staffId: staffProfileId, weekday },
+        }),
+      ),
+    ]);
+
+    return { success: true, weekdays: uniqueDays };
+  }
+
 }
