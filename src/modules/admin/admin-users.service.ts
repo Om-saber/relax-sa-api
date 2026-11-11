@@ -27,7 +27,18 @@ const userPublicSelect = {
       status: true,
       roleTitle: true,
       rating: true,
+      reviewsCount: true,
       commissionRate: true,
+      avatarUrl: true,
+      isPartOfTeam: true,
+      completedBookingsCount: true,
+      cityId: true,
+      services: {
+        select: { service: { select: { titleAr: true, titleEn: true } } },
+      },
+      offDays: {
+        select: { id: true, weekday: true },
+      },
     },
   },
 } satisfies Prisma.UserSelect;
@@ -53,10 +64,37 @@ export class AdminUsersService {
       ];
     }
 
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       select: userPublicSelect,
+    });
+
+    // Lookup cities for staff profiles
+    const cityIds = users
+      .map((u) => u.staffProfile?.cityId)
+      .filter((id): id is string => Boolean(id));
+    const cities = cityIds.length
+      ? await this.prisma.city.findMany({
+          where: { id: { in: cityIds } },
+          select: { id: true, nameAr: true, key: true },
+        })
+      : [];
+    const cityMap = new Map(cities.map((c) => [c.id, c.nameAr]));
+
+    return users.map((u) => {
+      const sp = u.staffProfile as any;
+      if (!sp) return u;
+      return {
+        ...u,
+        staffProfile: {
+          ...sp,
+          city: sp.cityId ? cityMap.get(sp.cityId) ?? null : null,
+          specialties: (sp.services || [])
+            .map((s: any) => s.service?.titleAr)
+            .filter(Boolean),
+        },
+      };
     });
   }
 
