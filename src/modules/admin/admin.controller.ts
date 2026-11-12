@@ -7,6 +7,9 @@ import { AdminBookingsService } from './admin-bookings.service';
 import { AdminOverviewService } from './admin-overview.service';
 import { AdminServicesService } from './admin-services.service';
 import { AdminCitiesService } from './admin-cities.service';
+import { AdminBranchesService } from './admin-branches.service';
+import { CreateBranchDto } from './dto/create-branch.dto';
+import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AdminClientsService } from './admin-clients.service';
 import { AdminSettingsService } from './admin-settings.service';
 import { AdminReportsService } from './admin-reports.service';
@@ -40,6 +43,7 @@ export class AdminController {
     private readonly overview: AdminOverviewService,
     private readonly services: AdminServicesService,
     private readonly cities: AdminCitiesService,
+    private readonly branchesService: AdminBranchesService,
     private readonly clientsService: AdminClientsService,
     private readonly settingsService: AdminSettingsService,
     private readonly reportsService: AdminReportsService,
@@ -304,6 +308,43 @@ export class AdminController {
   @ApiOperation({ summary: 'Assign specialist to booking (with double-booking guard)' })
   assignSpecialist(@Param('id') id: string, @Body() dto: AssignSpecialistDto) {
     return this.bookings.assignSpecialist(id, dto.specialistId);
+  }
+
+  // ===== Branches =====
+
+  @Get('branches')
+  @Permissions('manageCities')
+  @ApiOperation({ summary: 'list branches (optional city filter)' })
+  listBranches(@Query('cityId') cityId?: string) {
+    return this.branchesService.list(cityId);
+  }
+
+  @Post('branches')
+  @Permissions('manageCities')
+  @ApiOperation({ summary: 'create branch' })
+  createBranch(@Body() dto: CreateBranchDto) {
+    return this.branchesService.create(dto);
+  }
+
+  @Patch('branches/:id')
+  @Permissions('manageCities')
+  @ApiOperation({ summary: 'update branch' })
+  updateBranch(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
+    return this.branchesService.update(id, dto);
+  }
+
+  @Patch('branches/:id/toggle')
+  @Permissions('manageCities')
+  @ApiOperation({ summary: 'toggle branch active status' })
+  toggleBranch(@Param('id') id: string) {
+    return this.branchesService.toggle(id);
+  }
+
+  @Delete('branches/:id')
+  @Permissions('manageCities')
+  @ApiOperation({ summary: 'delete branch (fails if bookings exist)' })
+  deleteBranch(@Param('id') id: string) {
+    return this.branchesService.remove(id);
   }
 
   // ===== Clients (CRM) =====
