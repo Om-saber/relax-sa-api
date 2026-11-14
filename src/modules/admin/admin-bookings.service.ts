@@ -318,15 +318,21 @@ export class AdminBookingsService {
         },
       }).catch((err) => console.error('History log failed:', err));
 
-      // 3. Commission Creation
+      // 3. Commission Creation (Idempotent)
       if (isCompleting) {
-        await tx.commission.create({
-          data: {
+        const commAmount = Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100);
+        await tx.commission.upsert({
+          where: { bookingId: booking.id },
+          update: {
+            rate: staffProfile.commissionRate,
+            amount: commAmount,
+          },
+          create: {
             bookingId: booking.id,
             staffId: staffProfile.id,
             rate: staffProfile.commissionRate,
-            amount: Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100),
-            status: 'PENDING', // Assuming enum or string
+            amount: commAmount,
+            status: 'PENDING',
           },
         });
       }
