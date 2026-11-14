@@ -17,7 +17,8 @@ const envSchema = z.object({
 
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
 
-  OTP_DEV_MODE: booleanish.default(true),
+  // P0-4: يرجّع devCode في الـ response. مقفول افتراضياً، وممنوع في الإنتاج.
+  OTP_DEV_MODE: booleanish.default(false),
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_RESEND_SECONDS: z.coerce.number().int().positive().default(60),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
@@ -36,16 +37,49 @@ const envSchema = z.object({
   PAYPAL_BASE_URL: z.string().url().default('https://api-m.sandbox.paypal.com'),
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
 
-  SWAGGER_ENABLED: booleanish.default(true),
+  // P0-4: مقفول افتراضياً؛ لازم يتفعّل صراحةً.
+  SWAGGER_ENABLED: booleanish.default(false),
 
   SEED_ADMIN_EMAIL: z.string().email().optional().default('admin@relax.sa'),
-  SEED_ADMIN_PASSWORD: z.string().optional().default('ChangeMe123!'),
+  SEED_ADMIN_PASSWORD: z.string().optional(),
+});
+
+/** كلمة سر الـ seed القديمة اللي كانت افتراضية — ممنوعة في الإنتاج. */
+export const INSECURE_SEED_ADMIN_PASSWORD = 'ChangeMe123!';
+
+/**
+ * P0-4: في الإنتاج نرفض أي إعداد بيكشف الـ OTP أو بيبعته للـ console بدل SMS حقيقي،
+ * عشان deploy ناقص الإعدادات يفشل وهو بيقوم بدل ما يشتغل بشكل غير آمن.
+ */
+const productionSafeEnvSchema = envSchema.superRefine((env, ctx) => {
+  if (env.NODE_ENV !== 'production') return;
+
+  const fail = (path: keyof typeof env, message: string) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+
+  if (env.OTP_DEV_MODE) {
+    fail('OTP_DEV_MODE', 'OTP_DEV_MODE must be false in production (it returns the OTP in the response)');
+  }
+
+  if (env.SMS_PROVIDER === 'console') {
+    fail('SMS_PROVIDER', 'SMS_PROVIDER=console is not allowed in production; use taqnyat or msegat');
+  }
+  if (env.SMS_PROVIDER === 'taqnyat' && !env.TAQNYAT_BEARER_TOKEN) {
+    fail('TAQNYAT_BEARER_TOKEN', 'TAQNYAT_BEARER_TOKEN is required when SMS_PROVIDER=taqnyat');
+  }
+  if (env.SMS_PROVIDER === 'msegat' && (!env.MSEGAT_USERNAME || !env.MSEGAT_API_KEY)) {
+    fail('MSEGAT_API_KEY', 'MSEGAT_USERNAME and MSEGAT_API_KEY are required when SMS_PROVIDER=msegat');
+  }
+
+  if (env.SEED_ADMIN_PASSWORD === INSECURE_SEED_ADMIN_PASSWORD) {
+    fail('SEED_ADMIN_PASSWORD', 'SEED_ADMIN_PASSWORD must not be the default value in production');
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
 
 export function validateEnv(config: Record<string, unknown>): Env {
-  const parsed = envSchema.safeParse(config);
+  const parsed = productionSafeEnvSchema.safeParse(config);
 
   if (!parsed.success) {
     const details = parsed.error.flatten().fieldErrors;

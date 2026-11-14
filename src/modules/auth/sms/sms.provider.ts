@@ -87,21 +87,40 @@ export class MsegatSmsProvider implements SmsProvider {
   }
 }
 
+const factoryLogger = new Logger('SmsProviderFactory');
+
+/**
+ * P0-4: لو المزود المختار ناقصه مفاتيح، مانرجعش Console بصمت.
+ * في الإنتاج نرمي خطأ؛ في التطوير نرجع Console مع تحذير واضح.
+ */
+function missingCredentials(config: ConfigService, provider: string): SmsProvider {
+  const message = `SMS_PROVIDER=${provider} but its credentials are missing`;
+  if (config.get<string>('NODE_ENV') === 'production') {
+    throw new Error(message);
+  }
+  factoryLogger.warn(`${message}; falling back to console SMS (development only)`);
+  return new ConsoleSmsProvider();
+}
+
 export function createSmsProvider(config: ConfigService): SmsProvider {
   const provider = config.get<string>('SMS_PROVIDER') ?? 'console';
   const sender = config.get<string>('SMS_SENDER_NAME') ?? 'Relax-Spa';
 
+  if (provider === 'console' && config.get<string>('NODE_ENV') === 'production') {
+    throw new Error('SMS_PROVIDER=console is not allowed in production');
+  }
+
   switch (provider) {
     case 'taqnyat': {
       const token = config.get<string>('TAQNYAT_BEARER_TOKEN') ?? '';
-      return token ? new TaqnyatSmsProvider(token, sender) : new ConsoleSmsProvider();
+      return token ? new TaqnyatSmsProvider(token, sender) : missingCredentials(config, provider);
     }
     case 'msegat': {
       const username = config.get<string>('MSEGAT_USERNAME') ?? '';
       const apiKey = config.get<string>('MSEGAT_API_KEY') ?? '';
       return username && apiKey
         ? new MsegatSmsProvider(username, apiKey, sender)
-        : new ConsoleSmsProvider();
+        : missingCredentials(config, provider);
     }
     default:
       return new ConsoleSmsProvider();
