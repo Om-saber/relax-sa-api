@@ -24,11 +24,19 @@ const envSchema = z.object({
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   OTP_PEPPER: z.string().min(8, 'OTP_PEPPER must be at least 8 chars'),
 
-  SMS_PROVIDER: z.enum(['console', 'taqnyat', 'msegat']).default('console'),
+  // telegram: حل مؤقت لحد ما يبقى فيه SMS — الكود بيروح لجروب تليجرام للفريق
+  // ومعاه لينك واتساب جاهز يبعتوه منه للعميلة.
+  SMS_PROVIDER: z.enum(['console', 'taqnyat', 'msegat', 'telegram']).default('console'),
   SMS_SENDER_NAME: z.string().default('Relax-Spa'),
   TAQNYAT_BEARER_TOKEN: z.string().optional().default(''),
   MSEGAT_USERNAME: z.string().optional().default(''),
   MSEGAT_API_KEY: z.string().optional().default(''),
+
+  // Telegram (إشعارات الحجوزات + OTP المؤقت)
+  TELEGRAM_BOT_TOKEN: z.string().optional().default(''),
+  TELEGRAM_CHAT_ID: z.string().optional().default(''),
+  // جروب خاص لأكواد الدخول. لو فاضي بيستخدم TELEGRAM_CHAT_ID.
+  TELEGRAM_OTP_CHAT_ID: z.string().optional().default(''),
 
   // PayPal
   PAYPAL_CLIENT_ID: z.string().optional().default(''),
@@ -62,13 +70,26 @@ const productionSafeEnvSchema = envSchema.superRefine((env, ctx) => {
   }
 
   if (env.SMS_PROVIDER === 'console') {
-    fail('SMS_PROVIDER', 'SMS_PROVIDER=console is not allowed in production; use taqnyat or msegat');
+    fail(
+      'SMS_PROVIDER',
+      'SMS_PROVIDER=console is not allowed in production; use taqnyat, msegat or telegram',
+    );
   }
   if (env.SMS_PROVIDER === 'taqnyat' && !env.TAQNYAT_BEARER_TOKEN) {
     fail('TAQNYAT_BEARER_TOKEN', 'TAQNYAT_BEARER_TOKEN is required when SMS_PROVIDER=taqnyat');
   }
   if (env.SMS_PROVIDER === 'msegat' && (!env.MSEGAT_USERNAME || !env.MSEGAT_API_KEY)) {
     fail('MSEGAT_API_KEY', 'MSEGAT_USERNAME and MSEGAT_API_KEY are required when SMS_PROVIDER=msegat');
+  }
+
+  if (
+    env.SMS_PROVIDER === 'telegram' &&
+    (!env.TELEGRAM_BOT_TOKEN || !(env.TELEGRAM_OTP_CHAT_ID || env.TELEGRAM_CHAT_ID))
+  ) {
+    fail(
+      'TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN and TELEGRAM_OTP_CHAT_ID (or TELEGRAM_CHAT_ID) are required when SMS_PROVIDER=telegram',
+    );
   }
 
   if (env.SEED_ADMIN_PASSWORD === INSECURE_SEED_ADMIN_PASSWORD) {
