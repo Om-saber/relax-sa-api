@@ -14,10 +14,17 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 class BookingItemDto {
-  @ApiProperty({ example: 'calm-package' })
+  @ApiPropertyOptional({ example: 'calm-package' })
+  @IsOptional()
   @IsString()
   @MaxLength(80)
-  serviceSlug!: string;
+  serviceSlug?: string;
+
+  @ApiPropertyOptional({ example: 'spa-day' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  packageSlug?: string;
 
   @ApiProperty({ example: 1 })
   @IsInt()

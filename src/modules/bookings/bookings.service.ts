@@ -204,34 +204,71 @@ export class BookingsService {
     const endAt = new Date(`${dto.date}T${slot.endTime}:00+03:00`);
     if (endAt <= startAt) endAt.setUTCDate(endAt.getUTCDate() + 1);
 
-    const slugs = dto.items.map((i) => i.serviceSlug);
+    const serviceSlugs = dto.items.filter(i => i.serviceSlug).map((i) => i.serviceSlug!);
+    const packageSlugs = dto.items.filter(i => i.packageSlug).map((i) => i.packageSlug!);
+
     const services = await this.prisma.service.findMany({
-      where: { slug: { in: slugs }, isActive: true },
+      where: { slug: { in: serviceSlugs }, isActive: true },
       select: { id: true, slug: true, titleAr: true, titleEn: true, price: true, durationMinutes: true },
     });
-    if (services.length !== slugs.length) {
+    const packages = await this.prisma.package.findMany({
+      where: { slug: { in: packageSlugs }, isActive: true },
+      include: { items: { include: { service: true } } }
+    });
+
+    if (services.length !== serviceSlugs.length) {
       const found = new Set(services.map((s) => s.slug));
-      const missing = slugs.filter((s) => !found.has(s));
+      const missing = serviceSlugs.filter((s) => !found.has(s));
       throw new BadRequestException({
         code: 'SERVICES_NOT_FOUND',
         message: `خدمات غير موجودة: ${missing.join(', ')}`,
       });
     }
+    if (packages.length !== packageSlugs.length) {
+      const found = new Set(packages.map((p) => p.slug));
+      const missing = packageSlugs.filter((s) => !found.has(s));
+      throw new BadRequestException({
+        code: 'PACKAGES_NOT_FOUND',
+        message: `باقات غير موجودة: ${missing.join(', ')}`,
+      });
+    }
+    
     const serviceMap = new Map(services.map((s) => [s.slug, s]));
+    const packageMap = new Map(packages.map((p) => [p.slug, p]));
 
-    const itemsData = dto.items.map((item) => {
-      const svc = serviceMap.get(item.serviceSlug)!;
-      const lineTotal = Number(svc.price) * item.quantity;
-      return {
-        serviceId: svc.id,
-        titleAr: svc.titleAr,
-        titleEn: svc.titleEn,
-        unitPrice: svc.price,
-        quantity: item.quantity,
-        durationMinutes: svc.durationMinutes,
-        total: new Prisma.Decimal(lineTotal.toFixed(2)),
-      };
-    });
+    let packageId = null;
+    const itemsData: any[] = [];
+
+    for (const item of dto.items) {
+      if (item.serviceSlug) {
+        const svc = serviceMap.get(item.serviceSlug)!;
+        const lineTotal = Number(svc.price) * item.quantity;
+        itemsData.push({
+          serviceId: svc.id,
+          titleAr: svc.titleAr,
+          titleEn: svc.titleEn,
+          unitPrice: svc.price,
+          quantity: item.quantity,
+          durationMinutes: svc.durationMinutes,
+          total: new Prisma.Decimal(lineTotal.toFixed(2)),
+        });
+      } else if (item.packageSlug) {
+        const pkg = packageMap.get(item.packageSlug)!;
+        packageId = pkg.id;
+        for (const pkgItem of pkg.items) {
+          const lineTotal = Number(pkgItem.service.price) * pkgItem.quantity;
+          itemsData.push({
+            serviceId: pkgItem.serviceId,
+            titleAr: pkgItem.service.titleAr,
+            titleEn: pkgItem.service.titleEn,
+            unitPrice: pkgItem.service.price,
+            quantity: pkgItem.quantity,
+            durationMinutes: pkgItem.durationMinutes,
+            total: new Prisma.Decimal(lineTotal.toFixed(2)),
+          });
+        }
+      }
+    }
     const subtotal = itemsData.reduce((sum, i) => sum + Number(i.total), 0);
     const totalPrice = subtotal;
     const vatAmount = +(totalPrice - totalPrice / 1.15).toFixed(2);
@@ -268,6 +305,7 @@ export class BookingsService {
               startAt,
               endAt,
               bookingType: BookingType.INDIVIDUAL,
+              packageId: packageId,
               beneficiariesCount: dto.beneficiariesCount ?? 1,
               status: BookingStatus.PENDING,
               subtotal: new Prisma.Decimal(subtotal.toFixed(2)),
