@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { BookingStatus, BookingType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TelegramService } from '../notifications/telegram.service';
 import type { QuerySlotsDto } from './dto/query-slots.dto';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 import type { RescheduleBookingDto } from './dto/reschedule-booking.dto';
@@ -24,7 +25,10 @@ const DEFAULT_MAX_PER_SLOT = 10;
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegramService: TelegramService,
+  ) {}
 
   // ─────────────────────────────────────────────────────
   // GET /bookings/available-slots?date=YYYY-MM-DD&city=riyadh
@@ -241,7 +245,7 @@ export class BookingsService {
 
     const year = dateObj.getUTCFullYear();
     try {
-      return await this.prisma.$transaction(
+      const bookingResult = await this.prisma.$transaction(
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`booking_num_${year}`}))`;
 
@@ -285,6 +289,25 @@ export class BookingsService {
         },
         { timeout: 15000 },
       );
+
+      // Send Telegram Notification
+      try {
+        const servicesList = (bookingResult.items || []).map((i: any) => `${i.titleAr} (x${i.quantity})`).join(' • ');
+        const msg = `<b>🔔 حجز جديد!</b>\n\n` +
+                    `<b>رقم الحجز:</b> ${bookingResult.bookingNumber}\n` +
+                    `<b>العميلة:</b> ${bookingResult.customerName}\n` +
+                    `<b>الجوال:</b> ${bookingResult.customerPhone}\n` +
+                    `<b>الخدمات:</b> ${servicesList}\n` +
+                    `<b>التاريخ:</b> ${dto.date}\n` +
+                    `<b>الوقت:</b> ${bookingResult.timeSlot?.labelAr || dto.timeSlotKey}\n` +
+                    `<b>الإجمالي:</b> ${bookingResult.totalPrice} ر.س\n`;
+        
+        this.telegramService.sendMessage(msg).catch((e) => console.error('Telegram error:', e));
+      } catch (tgErr) {
+        console.error('Failed to build Telegram message:', tgErr);
+      }
+
+      return bookingResult;
     } catch (err) {
       if (typeof err?.message === 'string' && err.message.includes('BOOKING_CONFLICT')) {
         throw new ConflictException({
