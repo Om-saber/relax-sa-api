@@ -1,9 +1,42 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
-import { BookingStatus, PaymentProvider, PaymentStatus } from '@prisma/client';
+import { Booking, BookingStatus, Payment, PaymentProvider, PaymentStatus } from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../../prisma/prisma.service';
+import { findOwnedBookingOrThrow } from '../bookings/booking-ownership';
+
+/**
+ * الشكل اللي بيرجع للعميل. مفيش rawPayload (فيه اسم وإيميل الدافع من PayPal)
+ * ولا idempotencyKey.
+ */
+export function toPublicPayment(p: Payment) {
+  return {
+    id: p.id,
+    bookingId: p.bookingId,
+    amount: p.amount,
+    refundedAmount: p.refundedAmount,
+    currency: p.currency,
+    method: p.method,
+    provider: p.provider,
+    status: p.status,
+    providerRef: p.providerRef,
+    paidAt: p.paidAt,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+  };
+}
+
+/** أقل بيانات حجز تحتاجها صفحة نجاح الدفع. */
+export function toPublicBooking(b: Booking | null | undefined) {
+  if (!b) return null;
+  return {
+    id: b.id,
+    bookingNumber: b.bookingNumber,
+    status: b.status,
+    paymentStatus: b.paymentStatus,
+  };
+}
 
 type PayPalOrder = {
   id: string;
@@ -197,15 +230,9 @@ export class PaymentsService {
   // ─────────────────────────────────────────────────────
   // Create PayPal Order for a booking
   // ─────────────────────────────────────────────────────
-  async createOrderForBooking(bookingId: string) {
-    const booking = await this.prisma.booking.findFirst({
-      where: { id: bookingId, deletedAt: null },
-      include: { city: { select: { nameAr: true } } },
-    });
-
-    if (!booking) {
-      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
-    }
+  async createOrderForBooking(bookingId: string, userId: string) {
+    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN).
+    const booking = await findOwnedBookingOrThrow(this.prisma, bookingId, userId);
 
     if (booking.status === BookingStatus.CANCELLED) {
       throw new BadRequestException({ code: 'BOOKING_CANCELLED', message: 'الحجز ملغي' });
@@ -395,7 +422,12 @@ export class PaymentsService {
 
     // Idempotent: already recorded locally.
     if (payment.status === PaymentStatus.PAID) {
-      return { success: true, alreadyPaid: true, payment, booking: payment.booking };
+      return {
+        success: true,
+        alreadyPaid: true,
+        payment: toPublicPayment(payment),
+        booking: toPublicBooking(payment.booking),
+      };
     }
 
     const token = await this.getAccessToken();
@@ -434,8 +466,8 @@ export class PaymentsService {
           return {
             success: true,
             alreadyPaid: true,
-            payment: updatedPayment,
-            booking,
+            payment: toPublicPayment(updatedPayment),
+            booking: toPublicBooking(booking),
           };
         }
       }
@@ -480,13 +512,20 @@ export class PaymentsService {
       captureData,
     );
 
-    return { success: true, payment: updatedPayment, booking };
+    return {
+      success: true,
+      payment: toPublicPayment(updatedPayment),
+      booking: toPublicBooking(booking),
+    };
   }
 
   // ─────────────────────────────────────────────────────
   // Check payment status for a booking
   // ─────────────────────────────────────────────────────
-  async getPaymentStatusForBooking(bookingId: string) {
+  async getPaymentStatusForBooking(bookingId: string, userId: string) {
+    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN).
+    await findOwnedBookingOrThrow(this.prisma, bookingId, userId);
+
     const payments = await this.prisma.payment.findMany({
       where: { bookingId, provider: PaymentProvider.PAYPAL },
       orderBy: { createdAt: 'desc' },
@@ -496,8 +535,8 @@ export class PaymentsService {
     return {
       bookingId,
       hasPaid: payments.some((p) => p.status === PaymentStatus.PAID),
-      latest: payments[0] || null,
-      all: payments,
+      latest: payments[0] ? toPublicPayment(payments[0]) : null,
+      all: payments.map(toPublicPayment),
     };
   }
 }
