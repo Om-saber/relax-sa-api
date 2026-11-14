@@ -245,6 +245,7 @@ export class AdminBookingsService {
     }));
   }
 
+
   async updateMyBookingStatus(
     userId: string,
     bookingId: string,
@@ -252,7 +253,7 @@ export class AdminBookingsService {
   ) {
     const staffProfile = await this.prisma.staffProfile.findUnique({
       where: { userId },
-      select: { id: true },
+      select: { id: true, commissionRate: true },
     });
     if (!staffProfile) {
       throw new NotFoundException({
@@ -263,7 +264,7 @@ export class AdminBookingsService {
 
     const booking = await this.prisma.booking.findFirst({
       where: { id: bookingId, specialistId: staffProfile.id, deletedAt: null },
-      select: { id: true, status: true, bookingNumber: true },
+      select: { id: true, status: true, bookingNumber: true, totalPrice: true },
     });
     if (!booking) {
       throw new NotFoundException({
@@ -272,27 +273,65 @@ export class AdminBookingsService {
       });
     }
 
-    // Staff can only start or complete sessions
-    if (
-      newStatus !== BookingStatus.ON_WAY &&
-      newStatus !== BookingStatus.IN_PROGRESS &&
-      newStatus !== BookingStatus.COMPLETED
-    ) {
+    // State Machine: Define allowed transitions
+    const validTransitions: Record<string, string[]> = {
+      'CONFIRMED': ['ON_WAY', 'IN_PROGRESS'],
+      'ON_WAY': ['IN_PROGRESS'],
+      'IN_PROGRESS': ['COMPLETED'],
+    };
+
+    if (!validTransitions[booking.status]?.includes(newStatus)) {
       throw new BadRequestException({
         code: 'INVALID_STATUS_TRANSITION',
-        message: 'يمكنك فقط بدء الجلسة أو إنهاؤها',
+        message: `لا يمكن الانتقال من ${booking.status} إلى ${newStatus}`,
       });
     }
 
-    const updated = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: newStatus },
-      select: {
-        id: true,
-        bookingNumber: true,
-        status: true,
-        updatedAt: true,
-      },
+    const isCompleting = newStatus === BookingStatus.COMPLETED;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // 1. Update Booking
+      const updatedBooking = await tx.booking.update({
+        where: { id: bookingId },
+        data: { 
+          status: newStatus,
+          ...(isCompleting && {
+            commissionRateSnapshot: staffProfile.commissionRate,
+            commissionAmount: Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100),
+          })
+        },
+        select: {
+          id: true,
+          bookingNumber: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+
+      // 2. Booking Status History
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId: booking.id,
+          fromStatus: booking.status as any,
+          toStatus: newStatus as any,
+          changedById: userId,
+        },
+      }).catch((err) => console.error('History log failed:', err));
+
+      // 3. Commission Creation
+      if (isCompleting) {
+        await tx.commission.create({
+          data: {
+            bookingId: booking.id,
+            staffId: staffProfile.id,
+            rate: staffProfile.commissionRate,
+            amount: Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100),
+            status: 'PENDING', // Assuming enum or string
+          },
+        });
+      }
+
+      return updatedBooking;
     });
 
     return {
@@ -303,5 +342,6 @@ export class AdminBookingsService {
       updatedAt: updated.updatedAt,
     };
   }
+
 
 }
