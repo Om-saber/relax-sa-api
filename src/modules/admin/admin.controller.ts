@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Permissions } from '../../common/decorators/permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AdminUsersService } from './admin-users.service';
 import { AdminRolesService } from './admin-roles.service';
 import { AdminBookingsService } from './admin-bookings.service';
@@ -26,6 +27,7 @@ import { QueryAdminClientsDto } from './dto/query-admin-clients.dto';
 import { AddClientNoteDto } from './dto/add-client-note.dto';
 import { AssignSpecialistDto } from './dto/assign-specialist.dto';
 import { UpdateOffDaysDto } from './dto/update-off-days.dto';
+import { StaffBookingStatusDto } from './dto/staff-booking-status.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -308,6 +310,33 @@ export class AdminController {
   @ApiOperation({ summary: 'Assign specialist to booking (with double-booking guard)' })
   assignSpecialist(@Param('id') id: string, @Body() dto: AssignSpecialistDto) {
     return this.bookings.assignSpecialist(id, dto.specialistId);
+  }
+
+  // ===== Staff Portal =====
+
+  @Get('staff/bookings/today')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: "current staff member's bookings for today" })
+  getMyTodayBookings(@CurrentUser('id') userId: string) {
+    return this.bookings.getMyStaffBookings(userId, 'today');
+  }
+
+  @Get('staff/bookings/upcoming')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: "current staff member's upcoming bookings" })
+  getMyUpcomingBookings(@CurrentUser('id') userId: string) {
+    return this.bookings.getMyStaffBookings(userId, 'upcoming');
+  }
+
+  @Patch('staff/bookings/:id/status')
+  @Permissions('viewBookings')
+  @ApiOperation({ summary: 'start or complete own booking' })
+  updateMyBookingStatus(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: StaffBookingStatusDto,
+  ) {
+    return this.bookings.updateMyBookingStatus(userId, id, dto.status);
   }
 
   // ===== Branches =====
