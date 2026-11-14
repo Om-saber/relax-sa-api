@@ -21,9 +21,12 @@ openssl rand -base64 48   # JWT_REFRESH_SECRET
 openssl rand -base64 32   # OTP_PEPPER
 ```
 
-Rules:
-- `OTP_DEV_MODE` **must be `false`** in production.
-- `SMS_PROVIDER=console` only in development.
+Rules (enforced at startup when `NODE_ENV=production`, which the Dockerfile sets):
+- `OTP_DEV_MODE` defaults to `false`, and `true` is rejected in production. `devCode` is never returned in production.
+- `SMS_PROVIDER=console` is rejected in production. `taqnyat` needs `TAQNYAT_BEARER_TOKEN`, and `msegat` needs `MSEGAT_USERNAME` and `MSEGAT_API_KEY`.
+- **Temporary, until SMS is available:** `SMS_PROVIDER=telegram` sends each login code to a Telegram group with a ready WhatsApp link, and staff forward it to the customer. It needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OTP_CHAT_ID` (or `TELEGRAM_CHAT_ID`). Use a **private** group with only the people who send codes, because anyone in it can sign in as any customer who requests a code.
+- `SWAGGER_ENABLED` defaults to `false`, so set it to `true` explicitly to expose `/docs`.
+- `SEED_ADMIN_PASSWORD` must not be `ChangeMe123!` in production. The seed script requires 12+ characters there.
 - `CORS_ORIGINS` must list the exact frontend origins (no `*` with credentials).
 
 ## 3. Database
