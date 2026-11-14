@@ -7,6 +7,7 @@ import {
 import { BookingStatus, BookingType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TelegramService } from '../notifications/telegram.service';
+import { findOwnedBookingOrThrow } from './booking-ownership';
 import type { QuerySlotsDto } from './dto/query-slots.dto';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 import type { RescheduleBookingDto } from './dto/reschedule-booking.dto';
@@ -498,33 +499,8 @@ export class BookingsService {
   // ─────────────────────────────────────────────────────
   // Helper: find owned booking (admin can access any)
   // ─────────────────────────────────────────────────────
-  private async findOwnedBooking(id: string, userId: string) {
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-      select: { phone: true, role: true, clientProfile: { select: { id: true } } },
-    });
-    if (!user) {
-      throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'المستخدمة غير موجودة' });
-    }
-
-    const where: Prisma.BookingWhereInput = { id, deletedAt: null };
-
-    if (user.role !== UserRole.ADMIN) {
-      const orConditions: Prisma.BookingWhereInput[] = [];
-      if (user.clientProfile?.id) orConditions.push({ clientId: user.clientProfile.id });
-      if (user.phone) orConditions.push({ customerPhone: user.phone });
-
-      if (orConditions.length === 0) {
-        throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
-      }
-      where.OR = orConditions;
-    }
-
-    const booking = await this.prisma.booking.findFirst({ where });
-    if (!booking) {
-      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
-    }
-    return booking;
+  private findOwnedBooking(id: string, userId: string) {
+    return findOwnedBookingOrThrow(this.prisma, id, userId);
   }
   // ─────────────────────────────────────────────────────
   // Helpers
