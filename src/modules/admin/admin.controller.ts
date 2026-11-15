@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -70,29 +70,33 @@ export class AdminController {
   @Post('users')
   @Permissions('manageStaff')
   @ApiOperation({ summary: 'إنشاء موظفة/مدير جديد' })
-  createUser(@Body() dto: CreateUserDto) {
-    return this.users.create(dto);
+  createUser(@Body() dto: CreateUserDto, @CurrentUser('id') actorId: string) {
+    return this.users.create(dto, actorId);
   }
 
   @Patch('users/:id')
   @Permissions('manageStaff')
   @ApiOperation({ summary: 'تعديل بيانات مستخدمة' })
-  updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(id, dto);
+  updateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser('id') actorId: string,
+  ) {
+    return this.users.update(id, dto, actorId);
   }
 
   @Delete('users/:id')
   @Permissions('manageStaff')
   @ApiOperation({ summary: 'حذف/تعطيل مستخدمة' })
-  deleteUser(@Param('id') id: string) {
-    return this.users.remove(id);
+  deleteUser(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') actorId: string) {
+    return this.users.remove(id, actorId);
   }
 
   @Post('users/:id/reset-password')
   @Permissions('manageStaff')
   @ApiOperation({ summary: 'إعادة تعيين كلمة المرور' })
-  resetPassword(@Param('id') id: string) {
-    return this.users.resetPassword(id);
+  resetPassword(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') actorId: string) {
+    return this.users.resetPassword(id, actorId);
   }
 
   @Get('roles')
@@ -176,8 +180,9 @@ export class AdminController {
   updateStaffOffDays(
     @Param('id') id: string,
     @Body() dto: UpdateOffDaysDto,
+    @CurrentUser('id') actorId: string,
   ) {
-    return this.users.updateOffDays(id, dto.weekdays);
+    return this.users.updateOffDays(id, dto.weekdays, actorId);
   }
 
   @Get('settings/cms')
