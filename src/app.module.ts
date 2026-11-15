@@ -12,6 +12,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
+import { CmsModule } from './modules/cms/cms.module';
 import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -38,6 +39,7 @@ import { PrismaModule } from './prisma/prisma.module';
     BookingsModule,
     PaymentsModule,
     HealthModule,
+    CmsModule,
   ],
   providers: [
     // Order matters: throttle -> authenticate -> authorize
