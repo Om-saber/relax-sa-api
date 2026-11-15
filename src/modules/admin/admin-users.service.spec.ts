@@ -121,7 +121,11 @@ function makePrisma(users: FakeUser[]) {
         return data;
       },
     },
-    staffProfile: { findUnique: async () => null },
+    staffProfile: {
+      findUnique: async () => null,
+      create: async ({ data }: any) => data,
+    },
+    city: { findUnique: async () => ({ id: 'city-riyadh' }) },
     $transaction: async (arg: any) => (typeof arg === 'function' ? arg(prisma) : Promise.all(arg)),
   };
 

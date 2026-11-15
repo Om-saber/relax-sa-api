@@ -136,17 +136,36 @@ export class AdminUsersService {
     const userRole = ADMIN_ROLE_KEYS.includes(role.key) ? UserRole.ADMIN : UserRole.STAFF;
     const passwordHash = await argon2.hash(dto.password);
 
-    const created = await this.prisma.user.create({
-      data: {
-        name: dto.name.trim(),
-        email,
-        phone,
-        passwordHash,
-        role: userRole,
-        roleId: role.id,
-        isActive: true,
-      },
-      select: userPublicSelect,
+    // P1-15: STAFF accounts get their StaffProfile in the same transaction so
+    // they're immediately assignable (no orphan user without a profile).
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: dto.name.trim(),
+          email,
+          phone,
+          passwordHash,
+          role: userRole,
+          roleId: role.id,
+          isActive: true,
+        },
+        select: userPublicSelect,
+      });
+
+      if (userRole === UserRole.STAFF) {
+        const city = await tx.city.findUnique({ where: { key: 'riyadh' }, select: { id: true } });
+        await tx.staffProfile.create({
+          data: {
+            userId: user.id,
+            staffCode: `STF-${user.id.replace(/-/g, '').slice(0, 8).toUpperCase()}`,
+            roleTitle: role.nameAr ?? user.name,
+            cityId: city?.id ?? null,
+            commissionRate: 0,
+          },
+        });
+      }
+
+      return user;
     });
 
     await this.audit(actor.id, 'user.create', created.id, null, {
@@ -371,11 +390,12 @@ export class AdminUsersService {
       select: {
         id: true,
         key: true,
+        nameAr: true,
         permissions: { select: { permission: { select: { key: true } } } },
       },
     });
     if (!role) return null;
-    return { id: role.id, ...toRoleSnapshot(role)! };
+    return { id: role.id, nameAr: role.nameAr as string | undefined, ...toRoleSnapshot(role)! };
   }
 
   /** Only staff/admin accounts are managed here; customers are out of scope. */
