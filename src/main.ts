@@ -65,7 +65,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   const port = config.get<number>('PORT') ?? 3000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`API listening on http://localhost:${port}/api/v1`);
 }
 
