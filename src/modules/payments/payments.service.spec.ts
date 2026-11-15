@@ -1,7 +1,7 @@
 /**
  * Regression tests for P0-3 (payments IDOR + payer data leak).
  */
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { of } from 'rxjs';
 
 // @nestjs/axios ships ESM that ts-jest can't load; the service only needs it as a DI type.
@@ -103,15 +103,26 @@ function expectNoSecrets(value: unknown) {
 
 describe('PaymentsService — P0-3 IDOR', () => {
   describe('getPaymentStatusForBooking', () => {
-    it("rejects another customer's booking with BOOKING_NOT_FOUND", async () => {
+    it("(a) customer A reading customer B's payment status gets 403 with an Arabic message", async () => {
       const { service, prisma } = makeService();
-      await expect(service.getPaymentStatusForBooking(BOOKING, OTHER)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      const err = await service.getPaymentStatusForBooking(BOOKING, OTHER).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getStatus()).toBe(403);
+      expect(err.getResponse()).toMatchObject({
+        code: 'BOOKING_FORBIDDEN',
+        message: 'غير مسموح لكِ بالوصول إلى هذا الحجز',
+      });
       expect(prisma.payment.findMany).not.toHaveBeenCalled();
     });
 
-    it('returns status to the owner without rawPayload or idempotencyKey', async () => {
+    it('returns 404 when the booking does not exist', async () => {
+      const { service } = makeService();
+      await expect(
+        service.getPaymentStatusForBooking('22222222-2222-4222-8222-222222222222', OWNER),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('(c)+(e) returns status to the owner without rawPayload or idempotencyKey', async () => {
       const { service } = makeService();
       const res = await service.getPaymentStatusForBooking(BOOKING, OWNER);
       expect(res.all).toHaveLength(1);
@@ -128,13 +139,27 @@ describe('PaymentsService — P0-3 IDOR', () => {
   });
 
   describe('createOrderForBooking', () => {
-    it("refuses to create a PayPal order for another customer's booking", async () => {
+    it("(b) customer A creating an order on customer B's booking gets 403", async () => {
       const { service, prisma, http } = makeService();
       await expect(service.createOrderForBooking(BOOKING, OTHER)).rejects.toBeInstanceOf(
-        NotFoundException,
+        ForbiddenException,
       );
       expect(http.post).not.toHaveBeenCalled();
       expect(prisma.payment.create).not.toHaveBeenCalled();
+      expect(prisma.payment.update).not.toHaveBeenCalled();
+    });
+
+    it('(e) the owner can still create an order', async () => {
+      const { service, http } = makeService();
+      const res = await service.createOrderForBooking(BOOKING, OWNER);
+      expect(res.paypalOrderId).toBe('PAYPAL-ORDER-1');
+      expect(res.paymentId).toBe('pay-1');
+      expect(http.post).toHaveBeenCalledWith(
+        'https://paypal.test/v2/checkout/orders',
+        expect.anything(),
+        expect.anything(),
+      );
+      expectNoSecrets(res);
     });
   });
 

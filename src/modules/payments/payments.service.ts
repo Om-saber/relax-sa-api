@@ -231,8 +231,8 @@ export class PaymentsService {
   // Create PayPal Order for a booking
   // ─────────────────────────────────────────────────────
   async createOrderForBooking(bookingId: string, userId: string) {
-    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN).
-    const booking = await findOwnedBookingOrThrow(this.prisma, bookingId, userId);
+    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN)، وإلا 403.
+    const booking = await findOwnedBookingOrThrow(this.prisma, bookingId, userId, 'forbidden');
 
     if (booking.status === BookingStatus.CANCELLED) {
       throw new BadRequestException({ code: 'BOOKING_CANCELLED', message: 'الحجز ملغي' });
@@ -523,8 +523,8 @@ export class PaymentsService {
   // Check payment status for a booking
   // ─────────────────────────────────────────────────────
   async getPaymentStatusForBooking(bookingId: string, userId: string) {
-    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN).
-    await findOwnedBookingOrThrow(this.prisma, bookingId, userId);
+    // P0-3: لازم الحجز يكون بتاع المستخدمة (أو ADMIN)، وإلا 403.
+    await findOwnedBookingOrThrow(this.prisma, bookingId, userId, 'forbidden');
 
     const payments = await this.prisma.payment.findMany({
       where: { bookingId, provider: PaymentProvider.PAYPAL },

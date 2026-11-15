@@ -1,10 +1,24 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 
+export type NotOwnedBehaviour = 'not-found' | 'forbidden';
+
+const bookingNotFound = () =>
+  new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
+
+const bookingForbidden = () =>
+  new ForbiddenException({
+    code: 'BOOKING_FORBIDDEN',
+    message: 'غير مسموح لكِ بالوصول إلى هذا الحجز',
+  });
+
 /**
  * يرجّع الحجز لو المستخدمة تملكه (عن طريق ملف العميلة أو رقم الجوال)، أو لو كانت ADMIN.
- * غير كده يرمي BOOKING_NOT_FOUND (مش 403) عشان مانكشفش وجود الحجز.
+ *
+ * لو الحجز مش بتاعها:
+ *  - 'not-found' (الافتراضي، مستخدم في BookingsService): 404 عشان مانكشفش وجود الحجز.
+ *  - 'forbidden' (مستخدم في PaymentsService): 403 برسالة عربية، و404 لو الحجز مش موجود أصلاً.
  *
  * مشترك بين BookingsService و PaymentsService عشان قاعدة الملكية تبقى واحدة.
  */
@@ -12,6 +26,7 @@ export async function findOwnedBookingOrThrow(
   prisma: Pick<PrismaService, 'user' | 'booking'>,
   id: string,
   userId: string,
+  onNotOwned: NotOwnedBehaviour = 'not-found',
 ) {
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
@@ -27,16 +42,19 @@ export async function findOwnedBookingOrThrow(
     const orConditions: Prisma.BookingWhereInput[] = [];
     if (user.clientProfile?.id) orConditions.push({ clientId: user.clientProfile.id });
     if (user.phone) orConditions.push({ customerPhone: user.phone });
-
-    if (orConditions.length === 0) {
-      throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
-    }
-    where.OR = orConditions;
+    // مفيش شرط ملكية ممكن يطابق → نخلي الاستعلام مايرجعش حاجة.
+    where.OR = orConditions.length ? orConditions : [{ id: { in: [] } }];
   }
 
   const booking = await prisma.booking.findFirst({ where });
-  if (!booking) {
-    throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
+  if (booking) return booking;
+
+  if (onNotOwned === 'forbidden') {
+    const exists = await prisma.booking.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true },
+    });
+    if (exists) throw bookingForbidden();
   }
-  return booking;
+  throw bookingNotFound();
 }
