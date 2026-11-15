@@ -8,6 +8,7 @@ import { BookingStatus, BookingType, Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { findOwnedBookingOrThrow } from './booking-ownership';
+import { buildPackageLines } from './booking-pricing';
 import type { QuerySlotsDto } from './dto/query-slots.dto';
 import type { CreateBookingDto } from './dto/create-booking.dto';
 import type { RescheduleBookingDto } from './dto/reschedule-booking.dto';
@@ -256,18 +257,7 @@ export class BookingsService {
       } else if (item.packageSlug) {
         const pkg = packageMap.get(item.packageSlug)!;
         packageId = pkg.id;
-        for (const pkgItem of pkg.items) {
-          const lineTotal = Number(pkgItem.service.price) * pkgItem.quantity;
-          itemsData.push({
-            serviceId: pkgItem.serviceId,
-            titleAr: pkgItem.service.titleAr,
-            titleEn: pkgItem.service.titleEn,
-            unitPrice: pkgItem.service.price,
-            quantity: pkgItem.quantity,
-            durationMinutes: pkgItem.durationMinutes,
-            total: new Prisma.Decimal(lineTotal.toFixed(2)),
-          });
-        }
+        itemsData.push(...buildPackageLines(pkg, item.quantity));
       }
     }
     const subtotal = itemsData.reduce((sum, i) => sum + Number(i.total), 0);
