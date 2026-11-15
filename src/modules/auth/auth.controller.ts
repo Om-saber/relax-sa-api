@@ -17,13 +17,17 @@ import { LogoutDto, RefreshTokenDto } from './dto/token.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 
+/** P1-19: أقصى عدد طلبات OTP (طلب أو تحقق) لكل IP في الدقيقة. */
+export const OTP_IP_LIMIT_PER_MINUTE = 5;
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // P1-19: 5 طلبات/دقيقة لكل IP (ضد SMS pumping). وفيه كمان حد يومي لكل رقم في AuthService.
   @Public()
-  @Throttle({ default: { limit: 100, ttl: 60_000 } })
+  @Throttle({ default: { limit: OTP_IP_LIMIT_PER_MINUTE, ttl: 60_000 } })
   @Post('otp/request')
   @HttpCode(200)
   @ApiOperation({ summary: 'إرسال رمز تحقق OTP لرقم جوال سعودي' })
@@ -31,8 +35,9 @@ export class AuthController {
     return this.auth.requestOtp(dto, req.ip);
   }
 
+  // P1-19: نفس الحد على التحقق عشان تخمين الأكواد.
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: OTP_IP_LIMIT_PER_MINUTE, ttl: 60_000 } })
   @Post('otp/verify')
   @HttpCode(200)
   @ApiOperation({ summary: 'التحقق من OTP وإنشاء الجلسة' })

@@ -56,6 +56,8 @@ export class AuthService {
     const now = new Date();
     const resendSeconds = this.config.get<number>('OTP_RESEND_SECONDS') ?? 60;
 
+    await this.assertDailyOtpLimit(phone, now);
+
     const lastOtp = await this.prisma.otpCode.findFirst({
       where: { phone, consumedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -110,6 +112,40 @@ export class AuthService {
       // DEV ONLY. Never exposed when OTP_DEV_MODE=false.
       ...(devMode ? { devCode: code } : {}),
     };
+  }
+
+  /**
+   * P1-19: حد يومي لكل رقم جوال (نافذة متحركة 24 ساعة) ضد SMS pumping.
+   * بيعدّ من جدول otp_codes نفسه (فيه index على phone + createdAt)، فالحد ثابت
+   * حتى لو السيرفر اتعمله restart أو فيه أكتر من instance.
+   */
+  private async assertDailyOtpLimit(phone: string, now: Date) {
+    const limit = this.config.get<number>('OTP_DAILY_LIMIT_PER_PHONE') ?? 5;
+    const windowMs = 24 * 60 * 60 * 1000;
+    const since = new Date(now.getTime() - windowMs);
+
+    const recent = await this.prisma.otpCode.findMany({
+      where: { phone, createdAt: { gte: since } },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true },
+      take: limit,
+    });
+
+    if (recent.length < limit) return;
+
+    // أقدم كود في النافذة: لما يعدّي عليه 24 ساعة يفضى مكان.
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((recent[0].createdAt.getTime() + windowMs - now.getTime()) / 1000),
+    );
+    throw new HttpException(
+      {
+        code: 'OTP_DAILY_LIMIT',
+        message: 'تم تجاوز الحد اليومي لطلبات رمز التحقق لهذا الرقم، حاولي مرة أخرى لاحقًا',
+        retryAfter,
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
