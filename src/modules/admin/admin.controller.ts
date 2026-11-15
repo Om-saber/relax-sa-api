@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { AuthUser } from '../../common/types/auth-user';
 import { AdminUsersService } from './admin-users.service';
 import { AdminRolesService } from './admin-roles.service';
 import { AdminBookingsService } from './admin-bookings.service';
@@ -319,29 +320,37 @@ export class AdminController {
 
   // ===== Staff Portal =====
 
+  // Staff users carry no admin role (so no permissions); let the STAFF role in
+  // alongside viewBookings holders. The service scopes every query to the
+  // caller's own staff profile.
+  private assertStaffPortalAccess(user: AuthUser) {
+    if (user.role === 'STAFF' || user.permissions?.includes('viewBookings')) return;
+    throw new ForbiddenException('لا تملكين الصلاحية المطلوبة لهذا الإجراء');
+  }
+
   @Get('staff/bookings/today')
-  @Permissions('viewBookings')
   @ApiOperation({ summary: "current staff member's bookings for today" })
-  getMyTodayBookings(@CurrentUser('id') userId: string) {
-    return this.bookings.getMyStaffBookings(userId, 'today');
+  getMyTodayBookings(@CurrentUser() user: AuthUser) {
+    this.assertStaffPortalAccess(user);
+    return this.bookings.getMyStaffBookings(user.id, 'today');
   }
 
   @Get('staff/bookings/upcoming')
-  @Permissions('viewBookings')
   @ApiOperation({ summary: "current staff member's upcoming bookings" })
-  getMyUpcomingBookings(@CurrentUser('id') userId: string) {
-    return this.bookings.getMyStaffBookings(userId, 'upcoming');
+  getMyUpcomingBookings(@CurrentUser() user: AuthUser) {
+    this.assertStaffPortalAccess(user);
+    return this.bookings.getMyStaffBookings(user.id, 'upcoming');
   }
 
   @Patch('staff/bookings/:id/status')
-  @Permissions('viewBookings')
   @ApiOperation({ summary: 'start or complete own booking' })
   updateMyBookingStatus(
-    @CurrentUser('id') userId: string,
+    @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: StaffBookingStatusDto,
   ) {
-    return this.bookings.updateMyBookingStatus(userId, id, dto.status);
+    this.assertStaffPortalAccess(user);
+    return this.bookings.updateMyBookingStatus(user.id, id, dto.status);
   }
 
   // ===== Branches =====
