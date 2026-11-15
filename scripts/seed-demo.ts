@@ -1,7 +1,7 @@
 /**
  * Demo data seed — idempotent, safe to run repeatedly.
  *
- *   npx ts-node scripts/seed-demo.ts
+ *   npx tsx --env-file=.env scripts/seed-demo.ts
  *
  * Creates (or refreshes) demo admin/staff/customer accounts and 6 bookings
  * numbered DEMO-0001..DEMO-0006 over the next 7 days. Relies on cities,
@@ -166,6 +166,7 @@ async function main() {
   }
 
   await seedContent({ riyadhId: riyadh.id, services, staffProfiles, clients });
+  await seedCommerce();
 
   console.log(`\nDone: ${summary.length} records processed (✓ created, ↻ existing).`);
   console.log(`Staff/admin password: ${process.env.SEED_ADMIN_PASSWORD ? '(admin from SEED_ADMIN_PASSWORD)' : DEMO_PASSWORD}`);
@@ -382,6 +383,154 @@ async function seedContent(ctx: {
         },
       });
       log(`  ${existed ? '↻' : '✓'} ${bookingNumber} ${'★'.repeat(r.rating)} ${client.name} — ${service.titleAr}`);
+    }
+  }
+}
+
+// ----------------------------- Commerce / ops ------------------------------
+
+const COUPONS = [
+  { code: 'WELCOME20', type: 'PERCENTAGE' as const, value: 20 },
+  { code: 'SUMMER15', type: 'PERCENTAGE' as const, value: 15 },
+  { code: 'FIRST50', type: 'FIXED' as const, value: 50 }, // SAR
+];
+
+// Schema has no CAPTURED / PAYMENT_LINK enum values: PAID is the captured
+// state, and a paid payment link settles as a card payment via Moyasar.
+const DEMO_PAYMENTS = [
+  { bookingNumber: 'DEMO-0005', method: 'CASH' as const, provider: 'MANUAL' as const },
+  { bookingNumber: 'DEMO-0006', method: 'CARD' as const, provider: 'MOYASAR' as const },
+];
+
+const BOOKING_SETTINGS_KEY = 'booking'; // key read by AdminSettingsService
+const BOOKING_SETTINGS_PATCH = {
+  minAdvanceBookingHours: 2,
+  allowSpecialistSelection: true,
+  workingHours: { start: '10:00', end: '22:00' },
+};
+
+const DEMO_NOTIFICATIONS = [
+  { key: 'demo-notif-1', template: 'BOOKING_CREATED', bookingNumber: 'DEMO-0001' },
+  { key: 'demo-notif-2', template: 'BOOKING_CREATED', bookingNumber: 'DEMO-0003' },
+  { key: 'demo-notif-3', template: 'PAYMENT_RECEIVED', bookingNumber: 'DEMO-0005' },
+  { key: 'demo-notif-4', template: 'PAYMENT_RECEIVED', bookingNumber: 'DEMO-0006' },
+  { key: 'demo-notif-5', template: 'BOOKING_CANCELLED', bookingNumber: 'DEMO-0002' },
+];
+
+async function seedCommerce() {
+  console.log('Coupons:');
+  if (hasModel('coupon')) {
+    for (const c of COUPONS) {
+      const existed = await prisma.coupon.findUnique({ where: { code: c.code }, select: { id: true } });
+      await prisma.coupon.upsert({
+        where: { code: c.code },
+        update: { type: c.type, value: c.value, isActive: true },
+        create: { code: c.code, type: c.type, value: c.value, isActive: true },
+      });
+      log(`  ${existed ? '↻' : '✓'} ${c.code} — ${c.value}${c.type === 'PERCENTAGE' ? '%' : ' SAR'}`);
+    }
+  }
+
+  console.log('Payments:');
+  if (hasModel('payment')) {
+    for (const p of DEMO_PAYMENTS) {
+      const booking = await prisma.booking.findUnique({
+        where: { bookingNumber: p.bookingNumber },
+        select: { id: true, status: true, totalPrice: true },
+      });
+      if (!booking) {
+        console.warn(`  ⚠ ${p.bookingNumber} not found — skipped`);
+        continue;
+      }
+      const idempotencyKey = `demo-payment-${p.bookingNumber}`;
+      const existed = await prisma.payment.findUnique({ where: { idempotencyKey }, select: { id: true } });
+      await prisma.payment.upsert({
+        where: { idempotencyKey },
+        update: { amount: booking.totalPrice, method: p.method, provider: p.provider, status: 'PAID' },
+        create: {
+          bookingId: booking.id,
+          amount: booking.totalPrice,
+          method: p.method,
+          provider: p.provider,
+          status: 'PAID',
+          idempotencyKey,
+          paidAt: new Date(),
+        },
+      });
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { paymentMethod: p.method, paymentStatus: 'PAID' },
+      });
+      log(`  ${existed ? '↻' : '✓'} ${p.bookingNumber} ${p.method} ${booking.totalPrice.toString()} SAR (${booking.status})`);
+    }
+  }
+
+  console.log('Booking settings:');
+  if (hasModel('setting')) {
+    const row = await prisma.setting.findUnique({ where: { key: BOOKING_SETTINGS_KEY } });
+    const current = (row?.value ?? {}) as Record<string, unknown>;
+    const currentHours = (current.workingHours ?? {}) as Record<string, unknown>;
+    const next = {
+      ...current,
+      ...BOOKING_SETTINGS_PATCH,
+      workingHours: { ...currentHours, ...BOOKING_SETTINGS_PATCH.workingHours },
+    };
+    if (JSON.stringify(next) === JSON.stringify(current)) {
+      log(`  ↻ ${BOOKING_SETTINGS_KEY} already set`);
+    } else {
+      await prisma.setting.upsert({
+        where: { key: BOOKING_SETTINGS_KEY },
+        update: { value: next as Prisma.InputJsonValue },
+        create: { key: BOOKING_SETTINGS_KEY, value: next as Prisma.InputJsonValue },
+      });
+      log(`  ✓ ${BOOKING_SETTINGS_KEY} — minAdvance=2h, specialistSelection=on, hours 10:00–22:00`);
+    }
+  }
+
+  console.log('Notifications:');
+  if (hasModel('notification')) {
+    const admin = await prisma.user.findUnique({ where: { email: ADMIN.email }, select: { id: true, email: true } });
+    if (!admin) {
+      console.warn('  ⚠ demo-admin not found — skipped');
+      return;
+    }
+    // Notification has no type column: the type goes in `template`, and
+    // payload.demoKey makes the rows idempotent.
+    for (const nt of DEMO_NOTIFICATIONS) {
+      const booking = await prisma.booking.findUnique({
+        where: { bookingNumber: nt.bookingNumber },
+        select: { id: true, totalPrice: true, customerName: true },
+      });
+      if (!booking) {
+        console.warn(`  ⚠ ${nt.bookingNumber} not found — ${nt.key} skipped`);
+        continue;
+      }
+      const existing = await prisma.notification.findFirst({
+        where: { userId: admin.id, payload: { path: ['demoKey'], equals: nt.key } },
+        select: { id: true },
+      });
+      if (existing) {
+        log(`  ↻ ${nt.template} ${nt.bookingNumber}`);
+        continue;
+      }
+      await prisma.notification.create({
+        data: {
+          userId: admin.id,
+          channel: 'EMAIL',
+          template: nt.template,
+          recipient: admin.email,
+          status: 'SENT',
+          sentAt: new Date(),
+          payload: {
+            demoKey: nt.key,
+            bookingId: booking.id,
+            bookingNumber: nt.bookingNumber,
+            customerName: booking.customerName,
+            amount: booking.totalPrice.toString(),
+          },
+        },
+      });
+      log(`  ✓ ${nt.template} ${nt.bookingNumber}`);
     }
   }
 }
