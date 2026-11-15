@@ -257,6 +257,8 @@ const PACKAGES = [
   },
 ];
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 async function main() {
   console.log('🌱 Seeding database...');
 
@@ -299,7 +301,13 @@ async function main() {
 
   // --- Admin user ----------------------------------------------------------
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@relax.sa';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe123!';
+  // P0-4: في الإنتاج لازم كلمة سر حقيقية؛ القيمة الافتراضية للتطوير بس.
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? (isProduction ? '' : 'ChangeMe123!');
+  if (isProduction && (!adminPassword || adminPassword === 'ChangeMe123!' || adminPassword.length < 12)) {
+    throw new Error(
+      'SEED_ADMIN_PASSWORD must be set to a strong value (12+ chars, not the default) when seeding in production',
+    );
+  }
   const superAdmin = await prisma.role.findUnique({ where: { key: 'super-admin' } });
 
   await prisma.user.upsert({

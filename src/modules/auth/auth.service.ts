@@ -98,7 +98,10 @@ export class AuthService {
       `رمز التحقق الخاص بك في Let's Relax: ${code}\nصالح لمدة ${Math.max(1, Math.round(ttl / 60))} دقائق. لا تشاركيه مع أحد.`,
     );
 
-    const devMode = this.config.get<boolean>('OTP_DEV_MODE');
+    // P0-4: حتى لو OTP_DEV_MODE اتفعّل بالغلط، مانرجعش الكود أبداً في الإنتاج.
+    const devMode =
+      this.config.get<boolean>('OTP_DEV_MODE') === true &&
+      this.config.get<string>('NODE_ENV') !== 'production';
 
     return {
       phone,
