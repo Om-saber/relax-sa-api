@@ -22,6 +22,8 @@ const envSchema = z.object({
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   OTP_RESEND_SECONDS: z.coerce.number().int().positive().default(60),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // P1-19: أقصى عدد أكواد لكل رقم جوال في 24 ساعة.
+  OTP_DAILY_LIMIT_PER_PHONE: z.coerce.number().int().positive().default(5),
   OTP_PEPPER: z.string().min(8, 'OTP_PEPPER must be at least 8 chars'),
 
   // telegram: حل مؤقت لحد ما يبقى فيه SMS — الكود بيروح لجروب تليجرام للفريق
