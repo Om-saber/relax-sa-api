@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, Prisma } from '@prisma/client';
+import { BookingStatus, CommissionStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { applyCompletionCommission } from './booking-commission';
 import type { QueryAdminBookingsDto } from './dto/query-admin-bookings.dto';
 
 const VALID_STATUSES = Object.values(BookingStatus);
@@ -75,7 +76,7 @@ export class AdminBookingsService {
 
     const existing = await this.prisma.booking.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, totalPrice: true, specialistId: true },
     });
     if (!existing) {
       throw new NotFoundException({ code: 'BOOKING_NOT_FOUND', message: 'الحجز غير موجود' });
@@ -85,15 +86,27 @@ export class AdminBookingsService {
     if (upper === 'CANCELLED' && existing.status !== 'CANCELLED') {
       data.cancelledAt = new Date();
     }
+    // M1: completing from the dashboard must pay the specialist too, exactly
+    // like the staff-portal route (same helper, same transaction semantics).
+    const isCompleting = upper === BookingStatus.COMPLETED && existing.status !== BookingStatus.COMPLETED;
 
-    const updated = await this.prisma.booking.update({
-      where: { id },
-      data,
-      include: {
-        items: true,
-        city: { select: { key: true, nameAr: true } },
-        timeSlot: { select: { key: true, labelAr: true } },
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.update({ where: { id }, data, select: { id: true } });
+      if (isCompleting) {
+        await applyCompletionCommission(tx, {
+          id: booking.id,
+          totalPrice: existing.totalPrice,
+          specialistId: existing.specialistId,
+        });
+      }
+      return tx.booking.findUniqueOrThrow({
+        where: { id },
+        include: {
+          items: true,
+          city: { select: { key: true, nameAr: true } },
+          timeSlot: { select: { key: true, labelAr: true } },
+        },
+      });
     });
 
     return this.serialize(updated);
@@ -293,13 +306,7 @@ export class AdminBookingsService {
       // 1. Update Booking
       const updatedBooking = await tx.booking.update({
         where: { id: bookingId },
-        data: { 
-          status: newStatus,
-          ...(isCompleting && {
-            commissionRateSnapshot: staffProfile.commissionRate,
-            commissionAmount: Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100),
-          })
-        },
+        data: { status: newStatus },
         select: {
           id: true,
           bookingNumber: true,
@@ -318,22 +325,12 @@ export class AdminBookingsService {
         },
       }).catch((err) => console.error('History log failed:', err));
 
-      // 3. Commission Creation (Idempotent)
+      // 3. Commission (idempotent, shared with the admin status route)
       if (isCompleting) {
-        const commAmount = Number(booking.totalPrice) * (Number(staffProfile.commissionRate) / 100);
-        await tx.commission.upsert({
-          where: { bookingId: booking.id },
-          update: {
-            rate: staffProfile.commissionRate,
-            amount: commAmount,
-          },
-          create: {
-            bookingId: booking.id,
-            staffId: staffProfile.id,
-            rate: staffProfile.commissionRate,
-            amount: commAmount,
-            status: 'PENDING',
-          },
+        await applyCompletionCommission(tx, {
+          id: booking.id,
+          totalPrice: booking.totalPrice,
+          specialistId: staffProfile.id,
         });
       }
 
@@ -349,5 +346,34 @@ export class AdminBookingsService {
     };
   }
 
+  /** Staff portal KPI: the caller's commission totals across all bookings. */
+  async getMyCommissionSummary(userId: string) {
+    const staffProfile = await this.prisma.staffProfile.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!staffProfile) {
+      throw new NotFoundException({
+        code: 'STAFF_NOT_FOUND',
+        message: 'لا يوجد ملف موظفة مرتبط بهذا الحساب',
+      });
+    }
 
+    const rows = await this.prisma.commission.groupBy({
+      by: ['status'],
+      where: { staffId: staffProfile.id, status: { not: CommissionStatus.CANCELLED } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    });
+    const sumOf = (s: CommissionStatus) => Number(rows.find((r) => r.status === s)?._sum.amount ?? 0);
+    const pending = sumOf(CommissionStatus.PENDING);
+    const paid = sumOf(CommissionStatus.PAID);
+
+    return {
+      total: Math.round((pending + paid) * 100) / 100,
+      pending,
+      paid,
+      count: rows.reduce((n, r) => n + r._count._all, 0),
+    };
+  }
 }

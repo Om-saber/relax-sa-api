@@ -342,6 +342,13 @@ export class AdminController {
     return this.bookings.getMyStaffBookings(user.id, 'upcoming');
   }
 
+  @Get('staff/commissions/summary')
+  @ApiOperation({ summary: "current staff member's commission totals (pending + paid)" })
+  getMyCommissionSummary(@CurrentUser() user: AuthUser) {
+    this.assertStaffPortalAccess(user);
+    return this.bookings.getMyCommissionSummary(user.id);
+  }
+
   @Patch('staff/bookings/:id/status')
   @ApiOperation({ summary: 'start or complete own booking' })
   updateMyBookingStatus(
